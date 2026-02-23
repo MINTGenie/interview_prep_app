@@ -1,0 +1,32 @@
+# API key — never commit
+config.js
+
+# Claude Code local config
+.claude/
+
+# Browser test artifacts
+.playwright-mcp/
+
+# Windows artifact
+nul
+
+# Old single-role hardcoded files (not part of the generalized app)
+nvidia-interview-prep.html
+nvidia-interview-prep-accessible.html
+nvidia-gpu-soc-concept-map.html
+
+# Personal study notes
+00_*.md
+01_*.md
+02_*.md
+03_*.md
+04_*.md
+05_*.md
+06_*.md
+07_*.md
+08_*.md
+09_*.md
+
+# Python
+*.pyc
+__pycache__/

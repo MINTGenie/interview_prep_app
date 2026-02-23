@@ -1,0 +1,201 @@
+
+// ═══ SETUP & ANALYSIS FLOW ═══
+async function analyzeRole() {
+  const roleText = document.getElementById('role-txt').value.trim();
+  let resumeText = document.getElementById('resume-txt').value.trim();
+  if(!roleText) { showErr('setup-err','Please enter a job role description.'); return; }
+  if(!resumeText) { showErr('setup-err','Please enter your resume or profile.'); return; }
+  const s = loadSettings();
+  if(s.provider!=='ollama' && s.provider!=='lmstudio' && !s.apiKey) { openSettings(); return; }
+  if(document.getElementById('redact-cb').checked) resumeText = redactPII(resumeText);
+
+  const btn = document.getElementById('analyze-btn');
+  btn.disabled=true; btn.textContent='Analyzing...';
+  sessionCost = {promptTokens:0,completionTokens:0,model:s.model||''};
+  showScreen('gen');
+  setGenStep(1,'⟳','Analyzing role & candidate profile...',10);
+
+  try {
+    const prompt = buildAnalysisPrompt(roleText, resumeText);
+    const res = await llmComplete(prompt);
+    addCost(res.usage);
+    const analysis = parseJSON(res.content);
+    setGenStep(1,'✓','Role analyzed — '+((analysis.skillGaps||[]).length)+' skill gaps identified',100);
+
+    const session = newSession(roleText, analysis.resumeSummary||resumeText.substring(0,500), analysis);
+    curSession = session;
+    renderClarifyingScreen(analysis);
+    setGenStep(2,'⟳','Ready for your input...',5);
+    showScreen('clarify');
+  } catch(e) {
+    showScreen('setup');
+    showErr('setup-err','Analysis failed: '+e.message);
+  }
+  btn.disabled=false; btn.textContent='→ Analyze Role';
+}
+
+function setGenStep(n,icon,lbl,pct) {
+  const ic=document.getElementById('gs'+n+'-icon');
+  const lb=document.getElementById('gs'+n+'-lbl');
+  const fl=document.getElementById('gs'+n+'-fill');
+  if(ic) ic.textContent=icon;
+  if(lb) lb.textContent=lbl;
+  if(fl) fl.style.width=pct+'%';
+}
+
+function renderClarifyingScreen(analysis) {
+  const gaps = (analysis.skillGaps||[]).slice(0,8);
+  document.getElementById('analysis-summary').innerHTML =
+    `<strong>${analysis.role}</strong> at <strong>${analysis.company}</strong> (${analysis.seniority}) — `+
+    `<strong>${(analysis.requiredSkills||[]).length}</strong> required skills, `+
+    `<strong>${gaps.length}</strong> skill gaps identified: `+
+    gaps.map(g=>`<em>${g.skill}</em>`).join(', ');
+
+  const grid = document.getElementById('depth-grid');
+  if(!gaps.length) { grid.innerHTML='<p style="font-size:12px;color:var(--muted2)">No specific gaps identified — LLM will determine depth automatically.</p>'; return; }
+  grid.innerHTML = gaps.map(g=>`
+    <div class="depth-item">
+      <span>${g.skill}</span>
+      <div class="depth-radios">
+        <label><input type="radio" name="d_${g.skill.replace(/\s+/g,'_')}" value="aware"> Aware</label>
+        <label><input type="radio" name="d_${g.skill.replace(/\s+/g,'_')}" value="discuss" checked> Discuss</label>
+        <label><input type="radio" name="d_${g.skill.replace(/\s+/g,'_')}" value="hands-on"> Hands-on</label>
+      </div>
+    </div>`).join('');
+}
+
+async function generatePrep() {
+  if(!curSession) return;
+  const gaps = (curSession.analysis.skillGaps||[]).slice(0,8);
+  const depthMap = {};
+  gaps.forEach(g=>{
+    const nm = 'd_'+g.skill.replace(/\s+/g,'_');
+    const checked = document.querySelector(`input[name="${nm}"]:checked`);
+    if(checked) depthMap[g.skill]=checked.value;
+  });
+  curSession.context = {
+    round: parseInt(document.getElementById('c-round').value)||2,
+    format: document.getElementById('c-format').value,
+    interviewer: document.getElementById('c-interviewer').value,
+    depthMap,
+    previousTopics: document.getElementById('c-prev').value,
+    storyPrefs: document.getElementById('c-prefs').value,
+    topicsToAvoid: ''
+  };
+
+  const btn=document.getElementById('gen-btn');
+  btn.disabled=true; btn.textContent='Generating...';
+  showScreen('gen');
+  setGenStep(2,'⟳','Generating skills map & stories...',5);
+  setGenStep(3,'⟳','Preparing concept map & Q&A...',0);
+
+  try {
+    // ── Call A: bridges + stories ──
+    const promptA = buildBridgesStoriesPrompt(curSession);
+    let pctA=10; const tmA=setInterval(()=>{ pctA=Math.min(pctA+5,85); setGenStep(2,'⟳','Generating bridges & stories...',pctA); },600);
+    const resA = await llmComplete(promptA);
+    clearInterval(tmA);
+    addCost(resA.usage);
+    const dataA = parseJSON(resA.content);
+    curSession.bridges = dataA.bridges||[];
+    curSession.stories = dataA.stories||[];
+    setGenStep(2,'✓','Skills map & stories ready',100);
+
+    // init confidence states for bridges + stories
+    [...(curSession.bridges||[]), ...(curSession.stories||[]).filter(s=>s.type==='story')].forEach(item=>{
+      if(!curSession.confidence[item.id]) curSession.confidence[item.id]='fuzzy';
+    });
+
+    // ── Call B: concept map + mock interview ──
+    setGenStep(3,'⟳','Creating concept map & mock questions...',5);
+    const promptB = buildConceptMockPrompt(curSession);
+    let pctB=10; const tmB=setInterval(()=>{ pctB=Math.min(pctB+5,85); setGenStep(3,'⟳','Generating...',pctB); },600);
+    const resB = await llmComplete(promptB);
+    clearInterval(tmB);
+    addCost(resB.usage);
+    const dataB = parseJSON(resB.content);
+    curSession.conceptMap = dataB.conceptMap||{nodes:[],edges:[],categories:[]};
+    curSession.mockInterview = dataB.mockInterview||[];
+    setGenStep(3,'✓','Concept map & Q&A ready',100);
+
+    (curSession.mockInterview||[]).forEach(q=>{ if(!curSession.practiceStatus[q.id]) curSession.practiceStatus[q.id]=null; });
+
+    // save & show
+    const arr=loadSessions();
+    if(arr.length>=10) {
+      pendingDeleteId=arr[0].id;
+      // silently evict oldest (no prompt since it's auto)
+      arr.shift();
+    }
+    arr.push(curSession);
+    saveSessions(arr);
+    renderHistory();
+    renderPrepView();
+    showScreen('prep');
+  } catch(e) {
+    showScreen('clarify');
+    showErr('clarify-err','Generation failed: '+e.message);
+  }
+  btn.disabled=false; btn.textContent='→ Generate Prep Material';
+}
+
+// ═══ SESSION NAV ═══
+function startNewSession() {
+  curSession=null;
+  document.getElementById('role-txt').value='';
+  document.getElementById('resume-txt').value='';
+  document.querySelectorAll('.hitem').forEach(el=>el.classList.remove('active'));
+  showScreen('setup');
+}
+
+function loadSessionById(id) {
+  const arr=loadSessions();
+  const s=arr.find(x=>x.id===id);
+  if(!s) return;
+  curSession=s;
+  renderPrepView();
+  showScreen('prep');
+  document.querySelectorAll('.hitem').forEach(el=>el.classList.toggle('active',el.dataset.id===id));
+}
+
+function renderHistory() {
+  const list=document.getElementById('hist-list');
+  const arr=loadSessions().slice().reverse();
+  if(!arr.length){list.innerHTML='<div style="padding:10px;font-size:11px;color:var(--muted);text-align:center">No sessions yet</div>';return;}
+  list.innerHTML=arr.map(s=>{
+    const usd=s.tokenStats?.estimatedCostUSD||0;
+    const tok=s.tokenStats?.promptTokens+s.tokenStats?.completionTokens||0;
+    return `<div class="hitem${curSession&&s.id===curSession.id?' active':''}" data-id="${s.id}" onclick="loadSessionById('${s.id}')">
+      <div class="hitem-title">${esc(s.title)}</div>
+      <div class="hitem-meta"><span>${relTime(s.createdAt)}</span><span>${fmtTokens(tok)} tok</span><span>${fmtCost(usd)}</span></div>
+      <button class="hitem-del" title="Delete" onclick="event.stopPropagation();requestDelete('${s.id}')">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function requestDelete(id) {
+  pendingDeleteId=id;
+  document.getElementById('del-modal').style.display='flex';
+}
+function cancelDelete() { document.getElementById('del-modal').style.display='none'; pendingDeleteId=null; }
+function confirmDelete(download) {
+  if(download && pendingDeleteId) {
+    const arr=loadSessions(); const s=arr.find(x=>x.id===pendingDeleteId);
+    if(s) downloadSessionHTML(s);
+  }
+  if(pendingDeleteId) {
+    const arr=loadSessions().filter(s=>s.id!==pendingDeleteId);
+    saveSessions(arr);
+    if(curSession&&curSession.id===pendingDeleteId){curSession=null;showScreen('setup');}
+    renderHistory();
+  }
+  cancelDelete();
+}
+
+function clearAllData() {
+  if(!confirm('Delete ALL sessions and settings? This cannot be undone.')) return;
+  localStorage.removeItem(LS_SETTINGS); localStorage.removeItem(LS_SESSIONS);
+  curSession=null; renderHistory(); showScreen('setup');
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

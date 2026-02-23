@@ -1,0 +1,248 @@
+<body>
+<!-- Settings Modal -->
+<div id="settings-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <h3>⚙ API Settings</h3>
+    <div class="modal-row">
+      <label>LLM Provider</label>
+      <select id="s-provider" class="inp" onchange="updateModelList()">
+        <option value="gemini">Gemini (Google)</option>
+        <option value="openai">OpenAI (GPT)</option>
+        <option value="mistral">Mistral AI</option>
+        <option value="ollama">Ollama (local)</option>
+        <option value="claude">Claude (needs proxy.js)</option>
+        <option value="lmstudio">LM Studio (local)</option>
+      </select>
+    </div>
+    <div class="modal-row" id="s-model-row">
+      <label>Model</label>
+      <select id="s-model" class="inp"></select>
+    </div>
+    <div class="modal-row" id="s-key-row">
+      <label>API Key</label>
+      <input type="password" id="s-apikey" placeholder="Paste your API key here">
+      <div class="hint">Stored only in your browser localStorage. Never sent anywhere except the chosen LLM provider.</div>
+    </div>
+    <div class="modal-row" id="s-ollama-row" style="display:none">
+      <label>Ollama Model Name</label>
+      <input type="text" id="s-ollama-model" placeholder="llama3.2" class="inp">
+    </div>
+    <div class="modal-row" id="s-lmstudio-row" style="display:none">
+      <label>LM Studio URL</label>
+      <input type="text" id="s-lmstudio-url" value="http://localhost:1234" class="inp">
+      <label style="margin-top:8px">Model Name</label>
+      <input type="text" id="s-lmstudio-model" placeholder="e.g. qwen3-14b-interview-coach-v2" class="inp">
+      <div class="hint">LM Studio → Local Server tab → Start Server. Copy the <strong>API Model Identifier</strong> from LM Studio's right panel into the Model Name field above.</div>
+    </div>
+    <div class="modal-row" id="s-proxy-row" style="display:none">
+      <label>Proxy URL (for Claude)</label>
+      <input type="text" id="s-proxy" value="http://localhost:3001" class="inp">
+      <div class="hint">Run: <code>node proxy.js</code> in the same folder first.</div>
+    </div>
+    <div class="modal-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-size:12px">
+        <input type="checkbox" id="s-redact"> Redact PII before sending (names, email, phone stripped from resume text)
+      </label>
+    </div>
+    <div class="modal-btns">
+      <button class="sec-btn" onclick="closeSettings()">Cancel</button>
+      <button class="primary-btn" style="margin-top:0" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete Confirm Modal -->
+<div id="del-modal" class="modal-overlay" style="display:none">
+  <div class="modal-box" style="max-width:380px">
+    <h3>Delete Session</h3>
+    <p style="font-size:13px;color:var(--muted2);margin-bottom:16px">Download this session as a standalone HTML file before deleting?</p>
+    <div class="modal-btns" style="flex-direction:column;gap:8px">
+      <button class="primary-btn" style="margin-top:0;width:100%;background:#1a3a20;color:#4ade80" onclick="confirmDelete(true)">⬇ Download &amp; Delete</button>
+      <button class="sec-btn" style="width:100%;color:#f87171;border-color:rgba(239,68,68,.3)" onclick="confirmDelete(false)">Delete without saving</button>
+      <button class="sec-btn" style="width:100%" onclick="cancelDelete()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+  <!-- SIDEBAR -->
+  <aside id="sidebar">
+    <div id="sb-top">
+      <button id="new-btn" onclick="startNewSession()">＋ New Session</button>
+    </div>
+    <div id="hist-label">HISTORY</div>
+    <div id="hist-list"></div>
+    <div id="sb-footer">
+      <button class="sb-btn" onclick="openSettings()">⚙ Settings</button>
+      <button class="sb-btn" onclick="clearAllData()">🗑 Clear All Data</button>
+      <button class="sb-btn" id="dl-btn" onclick="downloadCurrentSession()">⬇ Download HTML</button>
+    </div>
+  </aside>
+
+  <!-- MAIN AREA -->
+  <div id="main-area">
+    <header id="top-bar">
+      <span id="top-title"><em>Interview</em> Prep App</span>
+      <div class="spacer"></div>
+      <div id="prog-wrap" style="display:none">
+        <span id="prog-lbl">0 / 0 solid</span>
+        <div id="prog-bar-el"><div id="prog-fill-el" style="width:0%"></div></div>
+      </div>
+      <button class="icon-btn" id="hc-btn" onclick="toggleHC()" title="Toggle high contrast">◑</button>
+    </header>
+
+    <div id="tab-bar">
+      <button class="tab-btn on" data-tab="skills">🔄 Skills Map</button>
+      <button class="tab-btn" data-tab="stories">🎯 Stories</button>
+      <button class="tab-btn" data-tab="concept">🗺 Concept Map</button>
+      <button class="tab-btn" data-tab="mock">❓ Mock Interview</button>
+    </div>
+
+    <!-- Screen A: Setup -->
+    <div id="screen-setup" class="screen">
+      <div class="setup-grid">
+        <div class="setup-card">
+          <h3>Role Description</h3>
+          <textarea id="role-txt" class="inp-area" placeholder="Paste the full job description here..."></textarea>
+          <div class="url-row">
+            <input type="url" id="role-url" placeholder="or paste job URL to fetch...">
+            <button class="mini-btn" onclick="fetchURL('role')">Fetch URL</button>
+          </div>
+        </div>
+        <div class="setup-card">
+          <h3>Your Resume / Profile</h3>
+          <div class="resume-tabs">
+            <button class="rtab on" onclick="switchRTab(this,'rpaste')">Paste Text</button>
+            <button class="rtab" onclick="switchRTab(this,'rpdf')">PDF</button>
+            <button class="rtab" onclick="switchRTab(this,'rdocx')">Word (.docx)</button>
+            <button class="rtab" onclick="switchRTab(this,'rurl')">URL</button>
+          </div>
+          <div id="rpaste" class="rtab-pane on">
+            <textarea id="resume-txt" class="inp-area" placeholder="Paste your resume or professional summary here..."></textarea>
+          </div>
+          <div id="rpdf" class="rtab-pane">
+            <div class="file-drop" onclick="document.getElementById('pdf-input').click()">
+              <input type="file" id="pdf-input" accept=".pdf" onchange="handlePDF(this)">
+              <div>📄 Click to select PDF file</div>
+              <div id="pdf-status" style="margin-top:5px;font-size:11px;color:var(--acc3)"></div>
+            </div>
+          </div>
+          <div id="rdocx" class="rtab-pane">
+            <div class="file-drop" onclick="document.getElementById('docx-input').click()">
+              <input type="file" id="docx-input" accept=".docx,.doc" onchange="handleDocx(this)">
+              <div>📝 Click to select Word file</div>
+              <div id="docx-status" style="margin-top:5px;font-size:11px;color:var(--acc3)"></div>
+            </div>
+          </div>
+          <div id="rurl" class="rtab-pane">
+            <div class="url-row">
+              <input type="url" id="resume-url" placeholder="LinkedIn / portfolio URL...">
+              <button class="mini-btn" onclick="fetchURL('resume')">Fetch</button>
+            </div>
+            <div class="notice">⚠ LinkedIn blocks scraping. Works best with personal portfolio or GitHub pages.</div>
+          </div>
+          <div class="privacy-row">
+            <span>🔒 Privacy:</span>
+            <span>Resume text is sent to your LLM provider but <strong>never stored</strong> in this app.</span>
+            <label><input type="checkbox" id="redact-cb" checked> Redact names/contact info</label>
+          </div>
+        </div>
+      </div>
+      <div id="setup-err" class="error-msg"></div>
+      <button class="primary-btn" onclick="analyzeRole()" id="analyze-btn">→ Analyze Role</button>
+    </div>
+
+    <!-- Screen B: Clarifying Questions -->
+    <div id="screen-clarify" class="screen hidden">
+      <div id="analysis-summary" class="analysis-summary"></div>
+      <div class="clarify-section">
+        <h3>1 — Interview Round &amp; Format</h3>
+        <div class="form-row">
+          <label>Round #</label>
+          <input type="number" id="c-round" value="2" min="1" max="10" class="inp" style="width:60px">
+          <label>Format</label>
+          <select id="c-format" class="inp">
+            <option value="technical">Technical Deep-Dive</option>
+            <option value="behavioral">Behavioral</option>
+            <option value="sysdesign">System Design</option>
+            <option value="panel">Panel</option>
+            <option value="mixed">Mixed</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Interviewer role</label>
+          <input type="text" id="c-interviewer" placeholder="e.g. Senior DL Engineer, Hiring Manager" class="inp" style="flex:1">
+        </div>
+      </div>
+      <div class="clarify-section">
+        <h3>2 — Depth Expected per Skill Gap</h3>
+        <div id="depth-grid" class="depth-grid"></div>
+      </div>
+      <div class="clarify-section">
+        <h3>3 — Previous Round Topics</h3>
+        <textarea id="c-prev" class="inp-area" style="min-height:70px" placeholder="What was covered in previous rounds? e.g. RDMA, shared memory, TensorRT basics..."></textarea>
+      </div>
+      <div class="clarify-section">
+        <h3>4 — Story Preferences</h3>
+        <textarea id="c-prefs" class="inp-area" style="min-height:70px" placeholder="Which projects to highlight? Topics to avoid? Language/tone preference?"></textarea>
+      </div>
+      <div id="clarify-err" class="error-msg"></div>
+      <button class="primary-btn" onclick="generatePrep()" id="gen-btn">→ Generate Prep Material</button>
+    </div>
+
+    <!-- Screen C: Generation Progress -->
+    <div id="screen-gen" class="screen hidden">
+      <div class="gen-card">
+        <h3>⚙ Generating your prep material...</h3>
+        <div class="gen-step"><span class="step-icon" id="gs1-icon">⟳</span><span id="gs1-lbl">Analyzing role &amp; candidate profile</span><div class="step-bar"><div class="step-fill" id="gs1-fill" style="width:0%"></div></div></div>
+        <div class="gen-step"><span class="step-icon" id="gs2-icon">⟳</span><span id="gs2-lbl">Building skills map &amp; stories</span><div class="step-bar"><div class="step-fill" id="gs2-fill" style="width:0%"></div></div></div>
+        <div class="gen-step"><span class="step-icon" id="gs3-icon">⟳</span><span id="gs3-lbl">Creating concept map &amp; Q&amp;A</span><div class="step-bar"><div class="step-fill" id="gs3-fill" style="width:0%"></div></div></div>
+        <div class="token-note" id="token-note">Waiting...</div>
+      </div>
+    </div>
+
+    <!-- Screen D: Prep View (tabs) -->
+    <div id="screen-prep" class="screen hidden" style="padding:0;display:flex;flex-direction:column;overflow:hidden">
+      <div id="tab-skills" class="tab-pane screen" style="padding:16px"></div>
+      <div id="tab-stories" class="tab-pane screen hidden" style="padding:16px"></div>
+      <div id="tab-concept" class="tab-pane screen hidden" style="padding:0;overflow:hidden">
+        <div id="concept-wrap">
+          <div id="cm-canvas-wrap">
+            <canvas id="cm-cv"></canvas>
+            <div id="cm-tip">
+              <div class="t-title" id="cm-t-title"></div>
+              <div class="t-sub" id="cm-t-sub"></div>
+              <div class="t-desc" id="cm-t-desc"></div>
+              <div class="t-tip" id="cm-t-tip"></div>
+              <div style="font-size:10px;color:#3a3a55;margin-top:4px">Double-click to cycle knowledge level</div>
+            </div>
+          </div>
+          <div id="cm-sidebar">
+            <div class="cm-actions">
+              <button class="cm-btn" id="cm-fit-btn">⊡ Fit</button>
+              <button class="cm-btn" id="cm-layout-btn">↺ Layout</button>
+              <button class="cm-btn" id="cm-edge-btn">→ Edge</button>
+              <button class="cm-btn" id="cm-reset-btn">✕ Reset</button>
+            </div>
+            <div class="cm-sb-sec" id="cm-legend-sec">
+              <h4>Categories</h4>
+              <div id="cm-legend"></div>
+            </div>
+            <div class="nlist" id="cm-nlist"></div>
+            <div style="padding:8px;border-top:1px solid var(--border);flex-shrink:0">
+              <button class="mini-btn" style="width:100%" onclick="suggestMoreTopics()">＋ Suggest More Topics</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="tab-mock" class="tab-pane screen hidden" style="padding:16px"></div>
+    </div>
+
+    <!-- Prompt area (visible in prep view) -->
+    <div id="prompt-area" style="display:none">
+      <pre id="prompt-out"></pre>
+      <button class="copy-btn" id="copy-prompt-btn">Copy Prompt</button>
+    </div>
+  </div>
+</div>
+<script>

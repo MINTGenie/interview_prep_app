@@ -1,0 +1,240 @@
+
+// ═══ PREP VIEW ORCHESTRATION ═══
+function renderPrepView() {
+  if(!curSession) return;
+  renderSkillsMap();
+  renderStories();
+  renderMockInterview();
+  cmInitialized=false; // force concept map re-init
+  updateProgress();
+  updatePrompt();
+}
+
+// ═══ PROGRESS ═══
+function updateProgress() {
+  if(!curSession) return;
+  const all=[...(curSession.bridges||[]),...(curSession.stories||[]).filter(s=>s.type==='story')];
+  const solid=all.filter(i=>curSession.confidence[i.id]==='solid').length;
+  document.getElementById('prog-lbl').textContent=solid+' / '+all.length+' solid';
+  document.getElementById('prog-fill-el').style.width=(all.length?solid/all.length*100:0)+'%';
+}
+
+const KL_CONF=['unknown','fuzzy','solid'];
+const KL_CONF_LABELS={'unknown':'?','fuzzy':'~','solid':'✓'};
+function cycleConf(id) {
+  if(!curSession) return;
+  const cur=curSession.confidence[id]||'fuzzy';
+  curSession.confidence[id]=KL_CONF[(KL_CONF.indexOf(cur)+1)%3];
+  updateAllConfDots(); updateProgress(); autoSave(); updatePrompt();
+}
+function updateAllConfDots() {
+  document.querySelectorAll('.conf-dot[data-id]').forEach(dot=>{
+    const id=dot.dataset.id;
+    const v=curSession?.confidence[id]||'fuzzy';
+    dot.className='conf-dot '+v;
+    if(document.body.classList.contains('hc')) {
+      dot.textContent = (v==='solid'?'✓ Solid':v==='fuzzy'?'~ Fuzzy':'? Unknown');
+    }
+  });
+}
+
+// ═══ TAB 1: SKILLS MAP ═══
+function renderSkillsMap() {
+  const container=document.getElementById('tab-skills');
+  if(!curSession||!curSession.bridges.length) {
+    container.innerHTML='<div style="color:var(--muted2);font-size:13px;padding:20px">No skills map data yet.</div>'; return;
+  }
+  const deck=document.createElement('div'); deck.className='deck';
+  curSession.bridges.forEach((b,i)=>{
+    const exp=curSession.expanded[b.id];
+    const conf=curSession.confidence[b.id]||'fuzzy';
+    const card=document.createElement('div');
+    card.className='bcard'+(exp?' expanded':'')+(i<3?' day1-card':' day2-card');
+    card.dataset.id=b.id;
+    const detOpen=curSession.expanded['detail_'+b.id];
+    card.innerHTML=`
+      <div class="bcard-hdr" data-action="expand" data-id="${b.id}">
+        <span class="topic-badge" style="background:${b.color}22;color:${b.color};border:1px solid ${b.color}44">${esc(b.badge||'')}</span>
+        <div class="card-title"><h4>${esc(b.title)}</h4><span>${esc(b.sub||'')}</span></div>
+        <div class="conf-dot ${conf}" data-id="${b.id}" data-action="conf" title="Click to cycle confidence"></div>
+        <span class="expand-icon">▼</span>
+      </div>
+      <div class="bcard-body">
+        <div class="two-col">
+          <div class="col-box"><h5 style="color:${b.color}aa">YOU KNOW</h5><p>${esc(b.know||'')}</p></div>
+          <div class="col-box"><h5 style="color:#60a0ff">ROLE NEEDS</h5><p>${esc(b.nvidia||b.role||'')}</p></div>
+        </div>
+        <div class="detail-section${detOpen?' open':''}" data-id="${b.id}">
+          <div class="detail-toggle" data-action="detail" data-id="${b.id}"><span>▶</span> Deep Dive</div>
+          <div class="detail-content">${(b.detail||[]).map(p=>`<p>${p}</p>`).join('')}
+            <div id="dd-extra-${b.id}"></div>
+          </div>
+        </div>
+        <div class="bridge-row"><div class="br-lbl">💬 Your Bridge</div><p>${esc(b.bridge||'')}</p></div>
+        <div class="dont-row"><div class="dr-lbl">⚠ Don't Say</div><p>${esc(b.dontSay||'')}</p>
+          <div class="instead">✓ Instead: ${esc(b.instead||'')}</div></div>
+        <button class="dive-btn" data-action="dive" data-id="${b.id}">↓ Dive Deeper (ask LLM for more depth)</button>
+      </div>`;
+    deck.appendChild(card);
+  });
+
+  container.innerHTML='';
+  container.appendChild(deck);
+  // Suggest more button
+  const sug=document.createElement('div');
+  sug.className='suggest-bar';
+  sug.innerHTML=`<button class="mini-btn" onclick="suggestMoreBridges()">＋ Suggest More Bridge Topics</button>
+    <div id="bridge-chips" class="expand-chips" style="display:none"></div>
+    <div id="bridge-chip-action" style="display:none"><button class="primary-btn" style="margin-top:0;padding:7px 16px;font-size:12px" onclick="addSelectedBridges()">Add selected →</button></div>`;
+  container.appendChild(sug);
+  updateAllConfDots();
+
+  // Event delegation
+  container.addEventListener('click', e=>{
+    const action=e.target.closest('[data-action]')?.dataset?.action;
+    const id=e.target.closest('[data-id]')?.dataset?.id;
+    if(!action||!id) return;
+    if(action==='conf'){e.stopPropagation();cycleConf(id);return;}
+    if(action==='expand'){curSession.expanded[id]=!curSession.expanded[id];renderSkillsMap();return;}
+    if(action==='detail'){e.stopPropagation();curSession.expanded['detail_'+id]=!curSession.expanded['detail_'+id];renderSkillsMap();return;}
+    if(action==='dive'){e.stopPropagation();diveDeeper('bridge',id);return;}
+  },{once:true});
+}
+
+// ═══ TAB 2: STORIES ═══
+function renderStories() {
+  const container=document.getElementById('tab-stories');
+  if(!curSession||!curSession.stories.length) {
+    container.innerHTML='<div style="color:var(--muted2);font-size:13px;padding:20px">No stories generated yet.</div>'; return;
+  }
+  container.innerHTML='';
+  curSession.stories.forEach(s=>{
+    if(s.type==='pitch') {
+      const card=document.createElement('div'); card.className='pitch-card';
+      card.innerHTML=`<h3>🎯 ${esc(s.title||'Pitch')}</h3>
+        <div class="pitch-body">${s.pitch||''}</div>
+        <div class="pitch-hint">🎧 ${esc(s.hint||'Practice saying this aloud for 45 seconds.')}</div>`;
+      container.appendChild(card); return;
+    }
+    const mode=curSession.storyMode[s.id]||'yours';
+    const isOpen=curSession.expanded['s_'+s.id];
+    const conf=curSession.confidence[s.id]||'fuzzy';
+    const data=mode==='role'?s.role:s.yours;
+    const card=document.createElement('div');
+    card.className='scard'+(isOpen?' open':'');
+    card.innerHTML=`
+      <div class="scard-hdr" data-action="sexp" data-id="${s.id}">
+        <div class="scard-num" style="background:${s.numColor||'#22c55e'}22;color:${s.numColor||'#22c55e'}">${s.num||'01'}</div>
+        <div class="scard-title"><h4>${esc(s.title)}</h4><span>${esc(s.context||'')}</span></div>
+        <button class="toggle-btn${mode==='role'?' role-mode':''}" data-action="toggle" data-id="${s.id}">
+          ${mode==='yours'?'🔄 Your Words':'🟢 Role Framing'}</button>
+        <div class="conf-dot ${conf}" data-id="${s.id}" data-action="conf"></div>
+        <span class="expand-icon">▼</span>
+      </div>
+      <div class="scard-body">
+        <div class="star-grid">
+          ${['s','t','a','r'].map((k,i)=>{
+            const labels=['Situation','Task','Action','Result'];
+            return `<div class="star-box${mode==='role'?' role-s':''}">
+              <h5 style="color:${mode==='role'?'#40a060':(s.numColor||'#22c55e')}aa">${labels[i]}</h5>
+              <p>${esc((data&&data[k])||'')}</p></div>`;
+          }).join('')}
+        </div>
+        <div class="ktp-box"><h5>Key Talking Points</h5>
+          <ul>${(s.ktp||[]).map(k=>`<li>${esc(k)}</li>`).join('')}</ul></div>
+        <div id="story-extra-${s.id}"></div>
+        <button class="dive-btn" data-action="sdive" data-id="${s.id}">↓ Dive Deeper (expand technical depth)</button>
+      </div>`;
+    container.appendChild(card);
+  });
+  updateAllConfDots();
+
+  container.addEventListener('click', e=>{
+    const action=e.target.closest('[data-action]')?.dataset?.action;
+    const id=e.target.closest('[data-id]')?.dataset?.id;
+    if(!action||!id) return;
+    if(action==='conf'){e.stopPropagation();cycleConf(id);return;}
+    if(action==='sexp'){curSession.expanded['s_'+id]=!curSession.expanded['s_'+id];renderStories();return;}
+    if(action==='toggle'){e.stopPropagation();curSession.storyMode[id]=curSession.storyMode[id]==='yours'?'role':'yours';renderStories();return;}
+    if(action==='sdive'){e.stopPropagation();diveDeeper('story',id);return;}
+  },{once:true});
+}
+
+// ═══ TAB 4: MOCK INTERVIEW ═══
+function renderMockInterview() {
+  const container=document.getElementById('tab-mock');
+  if(!curSession||!curSession.mockInterview.length) {
+    container.innerHTML='<div style="color:var(--muted2);font-size:13px;padding:20px">No mock interview questions yet.</div>'; return;
+  }
+  const sections=[
+    {key:'technical',label:'Technical Questions',color:'#3b82f6'},
+    {key:'behavioral',label:'Behavioral Questions',color:'#22c55e'},
+    {key:'scenario',label:'Scenario Questions',color:'#a855f7'}
+  ];
+  container.innerHTML='';
+  sections.forEach(sec=>{
+    const qs=curSession.mockInterview.filter(q=>q.section===sec.key);
+    if(!qs.length) return;
+    const secEl=document.createElement('div'); secEl.className='mock-section';
+    const isOpen=curSession.expanded['msec_'+sec.key]!==false; // default open
+    secEl.innerHTML=`
+      <div class="mock-section-hdr" onclick="toggleMockSection('${sec.key}')">
+        <h4 style="color:${sec.color}">${sec.label}</h4>
+        <span class="sec-badge" style="background:${sec.color}22;color:${sec.color}">${qs.length} Qs</span>
+        <span style="font-size:11px;color:var(--muted2)">${isOpen?'▲':'▼'}</span>
+      </div>
+      <div class="mock-questions${isOpen?' open':''}" id="msec-${sec.key}">
+        ${qs.map(q=>{
+          const st=curSession.practiceStatus[q.id];
+          const ansOpen=curSession.expanded['qa_'+q.id];
+          return `<div class="qcard" id="qcard-${q.id}">
+            <div class="qcard-top">
+              <div class="qcard-q">${esc(q.question)}</div>
+              ${st?`<span class="qstat ${st==='nailed'?'nailed':'needs'}">${st==='nailed'?'✓ Nailed':'⟳ Practice'}</span>`:''}
+            </div>
+            <div class="qcard-btns">
+              <button class="ans-btn" onclick="toggleQAns('${q.id}')">${ansOpen?'▼ Hide Answer':'▶ Show Answer'}</button>
+              <button class="p-btn nail" onclick="setPractice('${q.id}','nailed')">✓ Nailed it</button>
+              <button class="p-btn needs" onclick="setPractice('${q.id}','needs-work')">⟳ More Practice</button>
+              <button class="ans-btn" onclick="diveDeeper('mock','${q.id}')">↓ Deeper</button>
+            </div>
+            <div class="qcard-ans${ansOpen?' open':''}" id="qa-${q.id}">
+              ${esc(q.suggestedAnswer||'')}
+              ${q.starHint?`<div class="star-hint">💡 ${esc(q.starHint)}</div>`:''}
+              <div id="qa-extra-${q.id}"></div>
+            </div>
+          </div>`;
+        }).join('')}
+        <div style="padding:10px;border-top:1px solid var(--border)">
+          <button class="mini-btn" onclick="suggestMoreQuestions('${sec.key}')">＋ Suggest More ${sec.label}</button>
+          <div id="qchips-${sec.key}" class="expand-chips" style="display:none"></div>
+          <div id="qchip-action-${sec.key}" style="display:none">
+            <button class="primary-btn" style="margin-top:0;padding:7px 16px;font-size:12px" onclick="addSelectedQuestions('${sec.key}')">Add selected →</button>
+          </div>
+        </div>
+      </div>`;
+    container.appendChild(secEl);
+  });
+}
+
+function toggleMockSection(key) {
+  if(!curSession) return;
+  curSession.expanded['msec_'+key]=!(curSession.expanded['msec_'+key]!==false);
+  const el=document.getElementById('msec-'+key);
+  if(el) el.classList.toggle('open');
+  autoSave();
+}
+function toggleQAns(id) {
+  if(!curSession) return;
+  curSession.expanded['qa_'+id]=!curSession.expanded['qa_'+id];
+  const el=document.getElementById('qa-'+id);
+  if(el) el.classList.toggle('open');
+  const btn=el?.previousElementSibling?.querySelector('.ans-btn');
+  if(btn) btn.textContent=curSession.expanded['qa_'+id]?'▼ Hide Answer':'▶ Show Answer';
+  autoSave();
+}
+function setPractice(id, status) {
+  if(!curSession) return;
+  curSession.practiceStatus[id]=curSession.practiceStatus[id]===status?null:status;
+  autoSave(); renderMockInterview();
+}

@@ -1,0 +1,25 @@
+// config.js.example — copy this file to config.js, fill in your key, never commit config.js
+//
+// USAGE:
+//   1. Copy this file:  cp config.js.example config.js
+//   2. Fill in your provider and API key below.
+//   3. Place config.js in the SAME folder as interview-prep-app.html.
+//   4. The app reads window.PREP_CONFIG on startup — no need to paste keys in the Settings UI.
+//
+// SECURITY: config.js is in .gitignore — never commit it.
+//
+// PROVIDERS: gemini | openai | mistral | ollama | claude | lmstudio
+// MODELS (examples):
+//   gemini   → gemini-2.0-flash, gemini-1.5-flash, gemini-1.5-pro
+//   openai   → gpt-4o-mini, gpt-4o, gpt-4-turbo
+//   mistral  → mistral-small-latest, mistral-large-latest
+//   ollama   → llama3.2, llama3.1, mistral, phi3  (no apiKey needed)
+//   claude   → claude-3-5-haiku-20241022, claude-3-5-sonnet-20241022  (needs proxy.js running)
+//   lmstudio → paste the API Model Identifier shown in LM Studio  (no apiKey needed)
+
+window.PREP_CONFIG = {
+  provider: 'gemini',                  // Change to your provider
+  apiKey:   'YOUR_API_KEY_HERE',       // Paste your API key (leave blank for ollama/lmstudio)
+  model:    'gemini-2.0-flash',        // Optional: override the default model
+  // proxyUrl: 'http://localhost:3001', // Uncomment when using the Claude provider
+};

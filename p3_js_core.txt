@@ -1,0 +1,465 @@
+// ═══ CONFIG & CONSTANTS ═══
+const CFG = (typeof window.PREP_CONFIG !== 'undefined') ? window.PREP_CONFIG : {};
+const PRICING = {
+  'gemini-2.0-flash':{input:.075,output:.30},'gemini-1.5-pro':{input:1.25,output:5.0},
+  'gemini-1.5-flash':{input:.075,output:.30},'gpt-4o':{input:2.5,output:10.0},
+  'gpt-4o-mini':{input:.15,output:.60},'gpt-4-turbo':{input:10,output:30},
+  'claude-3-5-sonnet-20241022':{input:3,output:15},'claude-3-5-haiku-20241022':{input:.8,output:4},
+  'claude-3-opus-20240229':{input:15,output:75},
+  'mistral-large-latest':{input:3,output:9},'mistral-small-latest':{input:.2,output:.6},
+  'codestral-latest':{input:.3,output:.9},'ollama':{input:0,output:0}
+};
+const MODELS = {
+  gemini:['gemini-2.0-flash','gemini-1.5-flash','gemini-1.5-pro'],
+  openai:['gpt-4o-mini','gpt-4o','gpt-4-turbo'],
+  mistral:['mistral-small-latest','mistral-large-latest','codestral-latest'],
+  ollama:['llama3.2','llama3.1','mistral','phi3','qwen2.5'],
+  lmstudio:['local-model'],
+  claude:['claude-3-5-haiku-20241022','claude-3-5-sonnet-20241022','claude-3-opus-20240229']
+};
+
+// ═══ LLM CLIENTS ═══
+const LLM_SYS = 'You are an expert technical interview coach. Return ONLY valid JSON. No markdown fences, no explanation outside JSON.';
+
+async function llmComplete(prompt) {
+  const s = loadSettings();
+  const provider = s.provider||'gemini';
+  const apiKey = s.apiKey||'';
+  const model = s.model||(MODELS[provider]?.[0]||'');
+  if (provider !== 'ollama' && provider !== 'lmstudio' && !apiKey) throw new Error('No API key set. Click ⚙ Settings to add one.');
+  switch(provider) {
+    case 'gemini': return geminiComplete(apiKey, model, prompt);
+    case 'openai': return openaiComplete(apiKey, model, 'https://api.openai.com', prompt);
+    case 'mistral': return openaiComplete(apiKey, model, 'https://api.mistral.ai', prompt);
+    case 'claude': return claudeComplete(apiKey, model, s.proxyUrl||'http://localhost:3001', prompt);
+    case 'ollama': return ollamaComplete(s.ollamaModel||'llama3.2', prompt);
+    case 'lmstudio': return lmstudioComplete(s.lmstudioModel||s.model||'local-model', s.lmstudioUrl||'http://localhost:1234', prompt);
+    default: throw new Error('Unknown provider: '+provider);
+  }
+}
+
+async function lmstudioComplete(model, base, prompt) {
+  const r = await fetch(base+'/v1/chat/completions',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model,messages:[{role:'system',content:LLM_SYS},{role:'user',content:prompt}],temperature:.3,max_tokens:8192})});
+  const d = await r.json();
+  if(!r.ok) throw new Error('LM Studio: '+(d.error?.message||r.status)+' — verify model name matches exactly what LM Studio shows');
+  const lmFinish = d.choices[0]?.finish_reason;
+  console.log('[LMStudio] finish_reason:', lmFinish, '| output tokens:', d.usage?.completion_tokens, '| content length:', d.choices[0].message.content.length);
+  if(lmFinish==='length') console.warn('[LMStudio] TRUNCATED — response hit max_tokens limit');
+  return {content:d.choices[0].message.content,
+    usage:{promptTokens:d.usage?.prompt_tokens||0,completionTokens:d.usage?.completion_tokens||0}};
+}
+
+async function geminiComplete(key, model, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+  const body = {contents:[{role:'user',parts:[{text:LLM_SYS+'\n\n'+prompt}]}],
+    generationConfig:{responseMimeType:'application/json',temperature:.3,maxOutputTokens:8192}};
+  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d = await r.json();
+  if(!r.ok) throw new Error('Gemini: '+(d.error?.message||r.status));
+  const gemFinish = d.candidates[0]?.finishReason;
+  const gemOut = d.usageMetadata?.candidatesTokenCount||0;
+  console.log('[Gemini] finishReason:', gemFinish, '| output tokens:', gemOut, '| content length:', d.candidates[0].content.parts[0].text.length);
+  if(gemFinish==='MAX_TOKENS') console.warn('[Gemini] TRUNCATED — response hit maxOutputTokens limit');
+  return {content:d.candidates[0].content.parts[0].text,
+    usage:{promptTokens:d.usageMetadata?.promptTokenCount||0,completionTokens:gemOut}};
+}
+
+async function openaiComplete(key, model, base, prompt) {
+  const r = await fetch(base+'/v1/chat/completions',{method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model,messages:[{role:'system',content:LLM_SYS},{role:'user',content:prompt}],
+      response_format:{type:'json_object'},temperature:.3})});
+  const d = await r.json();
+  if(!r.ok) throw new Error((base.includes('mistral')?'Mistral':'OpenAI')+': '+(d.error?.message||r.status));
+  return {content:d.choices[0].message.content,
+    usage:{promptTokens:d.usage?.prompt_tokens||0,completionTokens:d.usage?.completion_tokens||0}};
+}
+
+async function claudeComplete(key, model, proxyUrl, prompt) {
+  const r = await fetch(proxyUrl+'/v1/messages',{method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01'},
+    body:JSON.stringify({model,max_tokens:4096,messages:[{role:'user',content:LLM_SYS+'\n\n'+prompt}]})});
+  const d = await r.json();
+  if(!r.ok) throw new Error('Claude: '+(d.error?.message||r.status)+' (Is proxy.js running?)');
+  return {content:d.content[0].text,usage:{promptTokens:d.usage?.input_tokens||0,completionTokens:d.usage?.output_tokens||0}};
+}
+
+async function ollamaComplete(model, prompt) {
+  const r = await fetch('http://localhost:11434/api/chat',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({model,messages:[{role:'system',content:LLM_SYS},{role:'user',content:prompt}],stream:false,format:'json'})});
+  const d = await r.json();
+  if(!r.ok) throw new Error('Ollama: '+r.status+' (Is Ollama running?)');
+  return {content:d.message?.content||'',usage:{promptTokens:d.prompt_eval_count||0,completionTokens:d.eval_count||0}};
+}
+
+function parseJSON(text) {
+  let t = text.trim();
+  // Strip markdown fences
+  t = t.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/\s*```$/,'').trim();
+  // Extract <JSON>...</JSON> tags
+  const tagged = t.match(/<JSON>([\s\S]*?)<\/JSON>/);
+  if(tagged) t = tagged[1].trim();
+  // Try direct parse first (clean output)
+  try { return JSON.parse(t); } catch(e) {}
+  // Model added prose before/after JSON — extract outermost { } or [ ]
+  const objMatch = t.match(/\{[\s\S]*\}/);
+  const arrMatch = t.match(/\[[\s\S]*\]/);
+  if(objMatch) try { return JSON.parse(objMatch[0]); } catch(e) {}
+  if(arrMatch) try { return JSON.parse(arrMatch[0]); } catch(e) {}
+  console.error('[parseJSON] All strategies failed. Full raw response:', t);
+  throw new SyntaxError('No valid JSON found in model response. Raw: '+t.substring(0,500));
+}
+
+// ═══ FILE PARSERS ═══
+function loadScript(src) {
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=rej;document.head.appendChild(s);
+  });
+}
+
+async function extractTextFromPDF(file) {
+  if(!window.pdfjsLib) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+  const ab = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:ab}).promise;
+  let text='';
+  for(let i=1;i<=pdf.numPages;i++){
+    const pg = await pdf.getPage(i);
+    const c = await pg.getTextContent();
+    text += c.items.map(it=>it.str).join(' ')+'\n';
+  }
+  return text;
+}
+
+async function extractTextFromDocx(file) {
+  if(!window.mammoth)
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
+  const ab = await file.arrayBuffer();
+  const r = await mammoth.extractRawText({arrayBuffer:ab});
+  return r.value;
+}
+
+async function fetchURL(type) {
+  const urlEl = document.getElementById(type==='role'?'role-url':'resume-url');
+  const url = urlEl.value.trim();
+  if(!url) return;
+  try {
+    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+    const r = await fetch(proxy);
+    const d = await r.json();
+    let text = d.contents||'';
+    text = text.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+    if(type==='role') document.getElementById('role-txt').value = text.substring(0,8000);
+    else document.getElementById('resume-txt').value = text.substring(0,8000);
+    urlEl.value='';
+  } catch(e) { showErr(type==='role'?'setup-err':'setup-err','Failed to fetch URL: '+e.message); }
+}
+
+function redactPII(text) {
+  return text
+    .replace(/\b[A-Z][a-z]+ [A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b/g,'[NAME]')
+    .replace(/[\w.+-]+@[\w.-]+\.\w{2,}/g,'[EMAIL]')
+    .replace(/(?:\+?[\d\s\-().]{8,})/g,'[PHONE]')
+    .replace(/\b\d{1,5}[\s,]+[A-Z][a-z]+[\s,]+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Boulevard|Blvd|Way|Court|Ct)\b/gi,'[ADDRESS]');
+}
+
+// ═══ SESSION MANAGEMENT ═══
+const LS_SETTINGS = 'prep_settings';
+const LS_SESSIONS = 'prep_sessions';
+
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(LS_SETTINGS)||'{}'); } catch(e){ return {}; }
+}
+function persistSettings(s) { localStorage.setItem(LS_SETTINGS,JSON.stringify(s)); }
+function loadSessions() {
+  try { return JSON.parse(localStorage.getItem(LS_SESSIONS)||'[]'); } catch(e){ return []; }
+}
+function saveSessions(arr) { localStorage.setItem(LS_SESSIONS,JSON.stringify(arr)); }
+
+function uuid() { return Date.now().toString(36)+Math.random().toString(36).substr(2,8); }
+function relTime(ts) {
+  const d=Date.now()-ts;
+  if(d<60000) return 'just now';
+  if(d<3600000) return Math.floor(d/60000)+'m ago';
+  if(d<86400000) return Math.floor(d/3600000)+'h ago';
+  return Math.floor(d/86400000)+'d ago';
+}
+function calcCost(model, pt, ct) {
+  const p=PRICING[model]||{input:0,output:0};
+  return (pt/1e6)*p.input+(ct/1e6)*p.output;
+}
+function fmtCost(usd) {
+  if(usd===0) return '$0.00 (local)';
+  if(usd<.001) return '<$0.001';
+  return '$'+usd.toFixed(3);
+}
+function fmtTokens(n) { return n>=1000?(n/1000).toFixed(1)+'k':String(n); }
+
+function newSession(roleText, resumeSummary, analysis) {
+  return {
+    id:uuid(), createdAt:Date.now(),
+    title:(analysis.role||'Role')+' at '+(analysis.company||'Company'),
+    tokenStats:{promptTokens:0,completionTokens:0,estimatedCostUSD:0},
+    roleText:roleText.substring(0,8000), resumeSummary,
+    analysis, context:{round:2,format:'technical',interviewer:'',depthMap:{},previousTopics:'',storyPrefs:'',topicsToAvoid:''},
+    bridges:[], stories:[], conceptMap:{nodes:[],edges:[],categories:[]}, mockInterview:[],
+    confidence:{}, storyMode:{}, expanded:{}, practiceStatus:{}
+  };
+}
+
+function autoSave() {
+  if(!curSession) return;
+  const arr = loadSessions();
+  const idx = arr.findIndex(s=>s.id===curSession.id);
+  if(idx>=0) arr[idx]=curSession; else arr.push(curSession);
+  saveSessions(arr);
+  renderHistory();
+}
+
+// ═══ STATE ═══
+let curSession = null;
+let pendingDeleteId = null;
+
+// ═══ COST TRACKING ═══
+let sessionCost = {promptTokens:0,completionTokens:0,model:''};
+function addCost(usage) {
+  if(!usage) return;
+  sessionCost.promptTokens += usage.promptTokens||0;
+  sessionCost.completionTokens += usage.completionTokens||0;
+  const s = loadSettings();
+  sessionCost.model = s.model||'';
+  const usd = calcCost(sessionCost.model, sessionCost.promptTokens, sessionCost.completionTokens);
+  const el = document.getElementById('token-note');
+  if(el) el.textContent = `Tokens: ${fmtTokens(sessionCost.promptTokens+sessionCost.completionTokens)} | Cost: ~${fmtCost(usd)}`;
+  if(curSession) {
+    curSession.tokenStats = {promptTokens:sessionCost.promptTokens,completionTokens:sessionCost.completionTokens,estimatedCostUSD:usd};
+  }
+}
+
+// ═══ SCREEN ROUTING ═══
+let activeScreen = 'setup';
+function showScreen(name) {
+  ['setup','clarify','gen','prep'].forEach(s=>{
+    const el=document.getElementById('screen-'+s);
+    if(el) el.classList.toggle('hidden', s!==name);
+  });
+  const tabBar = document.getElementById('tab-bar');
+  const progWrap = document.getElementById('prog-wrap');
+  const promptArea = document.getElementById('prompt-area');
+  const dlBtn = document.getElementById('dl-btn');
+  tabBar.style.display = name==='prep'?'flex':'none';
+  progWrap.style.display = name==='prep'?'flex':'none';
+  promptArea.style.display = name==='prep'?'flex':'none';
+  dlBtn.style.display = name==='prep'?'block':'none';
+  activeScreen = name;
+  if(name==='prep') updateProgress();
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('on', b.dataset.tab===name));
+  ['skills','stories','concept','mock'].forEach(t=>{
+    const el=document.getElementById('tab-'+t);
+    if(el) el.classList.toggle('hidden', t!==name);
+  });
+  if(name==='concept') initConceptMap();
+  updatePrompt();
+}
+
+document.querySelectorAll('.tab-btn').forEach(b=>{
+  b.addEventListener('click',()=>switchTab(b.dataset.tab));
+});
+
+// ═══ HIGH CONTRAST ═══
+function toggleHC() {
+  document.body.classList.toggle('hc');
+  const s=loadSettings();s.highContrast=document.body.classList.contains('hc');persistSettings(s);
+  document.getElementById('hc-btn').classList.toggle('on',s.highContrast);
+}
+
+// ═══ SETTINGS MODAL ═══
+const PROVIDER_LABELS = {gemini:'Gemini (Google)',openai:'OpenAI',mistral:'Mistral AI',ollama:'Ollama (local)',claude:'Claude (proxy)'};
+function updateModelList() {
+  const p=document.getElementById('s-provider').value;
+  const sel=document.getElementById('s-model');
+  sel.innerHTML=(MODELS[p]||[]).map(m=>`<option value="${m}">${m}</option>`).join('');
+  document.getElementById('s-ollama-row').style.display=p==='ollama'?'':'none';
+  document.getElementById('s-lmstudio-row').style.display=p==='lmstudio'?'':'none';
+  document.getElementById('s-proxy-row').style.display=p==='claude'?'':'none';
+  document.getElementById('s-key-row').style.display=(p==='ollama'||p==='lmstudio')?'none':'';
+}
+function openSettings() {
+  const s=loadSettings();
+  document.getElementById('s-provider').value=s.provider||'gemini';
+  updateModelList();
+  const sel=document.getElementById('s-model');
+  if(s.model&&[...sel.options].find(o=>o.value===s.model)) sel.value=s.model;
+  document.getElementById('s-apikey').value=s.apiKey||'';
+  document.getElementById('s-ollama-model').value=s.ollamaModel||'llama3.2';
+  document.getElementById('s-lmstudio-url').value=s.lmstudioUrl||'http://localhost:1234';
+  document.getElementById('s-lmstudio-model').value=s.lmstudioModel||'';
+  document.getElementById('s-proxy').value=s.proxyUrl||'http://localhost:3001';
+  document.getElementById('s-redact').checked=s.redactPII!==false;
+  document.getElementById('settings-modal').style.display='flex';
+}
+function closeSettings() { document.getElementById('settings-modal').style.display='none'; }
+function saveSettings() {
+  const s=loadSettings();
+  s.provider=document.getElementById('s-provider').value;
+  s.model=document.getElementById('s-model').value;
+  s.apiKey=document.getElementById('s-apikey').value;
+  s.ollamaModel=document.getElementById('s-ollama-model').value;
+  s.proxyUrl=document.getElementById('s-proxy').value;
+  s.lmstudioUrl=document.getElementById('s-lmstudio-url').value;
+  s.lmstudioModel=document.getElementById('s-lmstudio-model').value;
+  s.redactPII=document.getElementById('s-redact').checked;
+  persistSettings(s); closeSettings();
+}
+
+function showErr(id, msg) {
+  const el=document.getElementById(id);
+  if(!el) return;
+  el.textContent=msg; el.style.display='block';
+  setTimeout(()=>{el.style.display='none';},8000);
+}
+
+function switchRTab(el,pane) {
+  document.querySelectorAll('.rtab').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('.rtab-pane').forEach(p=>p.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById(pane).classList.add('on');
+}
+
+async function handlePDF(input) {
+  if(!input.files[0]) return;
+  const st=document.getElementById('pdf-status');
+  st.textContent='⟳ Extracting text...';
+  try {
+    const text = await extractTextFromPDF(input.files[0]);
+    document.getElementById('resume-txt').value=text;
+    switchRTab(document.querySelector('.rtab'),'rpaste');
+    document.querySelectorAll('.rtab')[0].click();
+    st.textContent='✓ Extracted '+Math.round(text.length/1000)+'k chars';
+  } catch(e) { st.textContent='✗ Error: '+e.message; }
+}
+async function handleDocx(input) {
+  if(!input.files[0]) return;
+  const st=document.getElementById('docx-status');
+  st.textContent='⟳ Extracting text...';
+  try {
+    const text = await extractTextFromDocx(input.files[0]);
+    document.getElementById('resume-txt').value=text;
+    document.querySelectorAll('.rtab')[0].click();
+    st.textContent='✓ Extracted '+Math.round(text.length/1000)+'k chars';
+  } catch(e) { st.textContent='✗ Error: '+e.message; }
+}
+
+// ═══ ANALYSIS PROMPTS ═══
+function buildAnalysisPrompt(roleText, resumeText) {
+  return `Analyze this job role and candidate profile. Return JSON exactly:
+{"company":"string","role":"string","seniority":"Junior|Mid|Senior|Staff|Principal",
+"requiredSkills":[{"skill":"string","category":"string","priority":"critical|preferred"}],
+"skillGaps":[{"skill":"string","userHas":"string","gap":"string"}],
+"techDomains":["string"],"keyResponsibilities":["string"],
+"resumeSummary":"2-3 sentences summarizing candidate background"}
+
+JOB ROLE:\n${roleText.substring(0,4000)}
+
+CANDIDATE PROFILE:\n${resumeText.substring(0,4000)}`;
+}
+
+function buildGenerationPrompt(session) {
+  const a=session.analysis, c=session.context;
+  const depths=Object.entries(c.depthMap||{}).map(([k,v])=>`${k}: ${v}`).join(', ');
+  return `Generate complete interview prep for this candidate. Return ONE JSON object:
+{"bridges":[{"id":"str","color":"#hex","badge":"str","title":"str","sub":"str",
+  "know":"2-3 sentences what candidate already knows",
+  "nvidia":"2-3 sentences what role needs (use role terminology)",
+  "detail":["technical paragraph 1","technical paragraph 2"],
+  "bridge":"scripted sentence candidate can say verbatim",
+  "dontSay":"phrase to avoid","instead":"better framing"}],
+"stories":[
+  {"id":"pitch","type":"pitch","num":"★","numColor":"#f97316","title":"The Honest Value Pitch",
+   "pitch":"<strong>Opening</strong> 2-3 paragraphs using HTML strong tags","hint":"practice instruction"},
+  {"id":"s1","type":"story","num":"01","numColor":"#22c55e","title":"Story Title","context":"company/time",
+   "yours":{"s":"situation","t":"task","a":"action","r":"result"},
+   "role":{"s":"reframed s","t":"reframed t","a":"reframed a","r":"reframed r"},
+   "ktp":["key point 1","key point 2","key point 3"]}],
+"conceptMap":{"categories":[{"id":"c1","label":"Category","color":"#hex"}],
+  "nodes":[{"id":"n1","label":"Short Label","sub":"subtitle","cat":"c1","x":200,"y":200,
+    "desc":"full description 2-3 sentences","tip":"interview tip 1-2 sentences"}],
+  "edges":[{"f":"n1","t":"n2","lbl":"relationship","col":"#hex"}]},
+"mockInterview":[{"id":"q1","section":"technical|behavioral|scenario",
+  "question":"full question text","suggestedAnswer":"detailed answer 2-3 sentences","starHint":"optional STAR tip"}]}
+
+ROLE: ${a.role} at ${a.company} (${a.seniority})
+REQUIRED SKILLS: ${(a.requiredSkills||[]).slice(0,10).map(s=>s.skill).join(', ')}
+SKILL GAPS: ${(a.skillGaps||[]).slice(0,8).map(s=>s.skill+' (has: '+s.userHas+')').join('; ')}
+KEY RESPONSIBILITIES: ${(a.keyResponsibilities||[]).slice(0,5).join('; ')}
+CANDIDATE: ${a.resumeSummary}
+ROUND: ${c.round}, FORMAT: ${c.format}, INTERVIEWER: ${c.interviewer||'unknown'}
+PREVIOUS TOPICS: ${c.previousTopics||'none'}
+STORY PREFS: ${c.storyPrefs||'none'}
+DEPTH: ${depths||'all discuss-level'}
+
+Generate: 5-7 bridges, 1 pitch + 3 STAR stories, 15-18 concept map nodes + 18-22 edges in 4-5 categories, 5-6 technical + 4-5 behavioral + 4-5 scenario questions.`;
+}
+
+function buildBridgesStoriesPrompt(session) {
+  const a=session.analysis, c=session.context;
+  const depths=Object.entries(c.depthMap||{}).map(([k,v])=>`${k}: ${v}`).join(', ');
+  return `Generate interview prep bridges and stories. Return JSON exactly:
+{"bridges":[{"id":"str","color":"#hex","badge":"str","title":"str","sub":"str",
+  "know":"2-3 sentences what candidate already knows",
+  "nvidia":"2-3 sentences what role needs (use role terminology)",
+  "detail":["technical paragraph 1","technical paragraph 2"],
+  "bridge":"scripted sentence candidate can say verbatim",
+  "dontSay":"phrase to avoid","instead":"better framing"}],
+"stories":[
+  {"id":"pitch","type":"pitch","num":"★","numColor":"#f97316","title":"The Honest Value Pitch",
+   "pitch":"<strong>Opening</strong> 2-3 paragraphs using HTML strong tags","hint":"practice instruction"},
+  {"id":"s1","type":"story","num":"01","numColor":"#22c55e","title":"Story Title","context":"company/time",
+   "yours":{"s":"situation","t":"task","a":"action","r":"result"},
+   "role":{"s":"reframed s","t":"reframed t","a":"reframed a","r":"reframed r"},
+   "ktp":["key point 1","key point 2","key point 3"]}]}
+
+ROLE: ${a.role} at ${a.company} (${a.seniority})
+REQUIRED SKILLS: ${(a.requiredSkills||[]).slice(0,10).map(s=>s.skill).join(', ')}
+SKILL GAPS: ${(a.skillGaps||[]).slice(0,8).map(s=>s.skill+' (has: '+s.userHas+')').join('; ')}
+KEY RESPONSIBILITIES: ${(a.keyResponsibilities||[]).slice(0,5).join('; ')}
+CANDIDATE: ${a.resumeSummary}
+ROUND: ${c.round}, FORMAT: ${c.format}, INTERVIEWER: ${c.interviewer||'unknown'}
+PREVIOUS TOPICS: ${c.previousTopics||'none'}
+STORY PREFS: ${c.storyPrefs||'none'}
+DEPTH: ${depths||'all discuss-level'}
+
+Generate: 5-7 bridges, 1 pitch + 3 STAR stories.`;
+}
+
+function buildConceptMockPrompt(session) {
+  const a=session.analysis, c=session.context;
+  const depths=Object.entries(c.depthMap||{}).map(([k,v])=>`${k}: ${v}`).join(', ');
+  return `Generate interview prep concept map and mock questions. Return JSON exactly:
+{"conceptMap":{"categories":[{"id":"c1","label":"Category","color":"#hex"}],
+  "nodes":[{"id":"n1","label":"Short Label","sub":"subtitle","cat":"c1","x":200,"y":200,
+    "desc":"full description 2-3 sentences","tip":"interview tip 1-2 sentences"}],
+  "edges":[{"f":"n1","t":"n2","lbl":"relationship","col":"#hex"}]},
+"mockInterview":[{"id":"q1","section":"technical|behavioral|scenario",
+  "question":"full question text","suggestedAnswer":"detailed answer 2-3 sentences","starHint":"optional STAR tip"}]}
+
+ROLE: ${a.role} at ${a.company} (${a.seniority})
+REQUIRED SKILLS: ${(a.requiredSkills||[]).slice(0,10).map(s=>s.skill).join(', ')}
+SKILL GAPS: ${(a.skillGaps||[]).slice(0,8).map(s=>s.skill+' (has: '+s.userHas+')').join('; ')}
+TECH DOMAINS: ${(a.techDomains||[]).join(', ')}
+KEY RESPONSIBILITIES: ${(a.keyResponsibilities||[]).slice(0,5).join('; ')}
+CANDIDATE: ${a.resumeSummary}
+ROUND: ${c.round}, FORMAT: ${c.format}, INTERVIEWER: ${c.interviewer||'unknown'}
+PREVIOUS TOPICS: ${c.previousTopics||'none'}
+DEPTH: ${depths||'all discuss-level'}
+
+Generate: 15-18 concept map nodes + 18-22 edges in 4-5 categories, 5-6 technical + 4-5 behavioral + 4-5 scenario questions.`;
+}

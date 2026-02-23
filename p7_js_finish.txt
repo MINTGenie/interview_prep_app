@@ -1,0 +1,483 @@
+
+// ═══ DIVE DEEPER ═══
+async function diveDeeper(type, id) {
+  if(!curSession) return;
+  const s=loadSettings();
+  if(s.provider!=='ollama'&&s.provider!=='lmstudio'&&!s.apiKey){ openSettings(); return; }
+
+  let extraId, promptTxt;
+  if(type==='bridge') {
+    const item=curSession.bridges.find(b=>b.id===id);
+    if(!item) return;
+    extraId='dd-extra-'+id;
+    promptTxt=`Interview coach for ${curSession.analysis?.role||'role'} at ${curSession.analysis?.company||'company'}.
+Background: ${curSession.resumeSummary?.substring(0,300)||''}
+Bridge topic: "${item.title}" — what they know: ${item.know} — role needs: ${item.nvidia||item.role||''}
+Return JSON {"paragraphs":["detailed paragraph 1 with specs and examples","paragraph 2 with interview talking points"]}`;
+  } else if(type==='story') {
+    const item=curSession.stories.find(s=>s.id===id);
+    if(!item) return;
+    extraId='story-extra-'+id;
+    promptTxt=`Interview coach for ${curSession.analysis?.role||'role'} at ${curSession.analysis?.company||'company'}.
+Story: "${item.title}" — action: ${(item.yours||item.role||{}).a||''} — result: ${(item.yours||item.role||{}).r||''}
+Return JSON {"paragraphs":["expanded technical depth paragraph","quantified metrics and role-specific framing paragraph"]}`;
+  } else if(type==='mock') {
+    const item=curSession.mockInterview.find(q=>q.id===id);
+    if(!item) return;
+    extraId='qa-extra-'+id;
+    promptTxt=`Interview coach for ${curSession.analysis?.role||'role'} at ${curSession.analysis?.company||'company'}.
+Question: "${item.question}" — current answer: ${item.suggestedAnswer||''}
+Return JSON {"paragraphs":["deeper technical nuance paragraph","edge cases and alternative approaches paragraph"]}`;
+  } else return;
+
+  const el=document.getElementById(extraId);
+  if(!el) return;
+  el.innerHTML='<div style="color:var(--muted2);font-size:12px;padding:8px 0">⟳ Fetching deeper content...</div>';
+  try {
+    const res=await llmComplete(promptTxt);
+    addCost(res.usage);
+    const data=parseJSON(res.content);
+    const paras=data.paragraphs||[];
+    if(paras.length) {
+      el.innerHTML=paras.map(p=>`<p style="font-size:12px;color:var(--muted2);line-height:1.7;margin-top:8px">${esc(String(p))}</p>`).join('');
+    } else {
+      el.innerHTML=`<p style="font-size:12px;color:var(--muted2);line-height:1.7;margin-top:8px">${esc(res.content.substring(0,600))}</p>`;
+    }
+  } catch(e) {
+    el.innerHTML=`<div style="color:#f87171;font-size:12px;padding:4px 0">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+// ═══ SUGGEST MORE BRIDGES ═══
+async function suggestMoreBridges() {
+  if(!curSession) return;
+  const s=loadSettings();
+  if(s.provider!=='ollama'&&s.provider!=='lmstudio'&&!s.apiKey){ openSettings(); return; }
+  const chipsEl=document.getElementById('bridge-chips');
+  const actionEl=document.getElementById('bridge-chip-action');
+  chipsEl.style.display='block';
+  chipsEl.innerHTML='<span style="color:var(--muted2);font-size:12px">⟳ Loading suggestions...</span>';
+  try {
+    const existing=curSession.bridges.map(b=>b.title).join(', ');
+    const res=await llmComplete(`Interview coach for ${curSession.analysis?.role||'role'} at ${curSession.analysis?.company||'company'}.
+Existing bridge topics: ${existing}. Role: ${curSession.roleText?.substring(0,400)||''}. Candidate: ${curSession.resumeSummary?.substring(0,200)||''}
+Suggest 5 additional bridge topics not already covered.
+Return JSON: {"topics":[{"id":"b_ex_1","title":"Topic Title","sub":"subtitle"}]}`);
+    addCost(res.usage);
+    const data=parseJSON(res.content);
+    const topics=data.topics||[];
+    if(!topics.length){ chipsEl.innerHTML='<span style="color:var(--muted2);font-size:12px">No suggestions returned.</span>'; return; }
+    chipsEl.innerHTML=topics.map(t=>`<label class="chip-label"><input type="checkbox" class="bridge-chip-cb" value="${esc(t.id)}" data-json='${JSON.stringify(t).replace(/'/g,"&#39;")}'> ${esc(t.title)}</label>`).join('');
+    actionEl.style.display='block';
+  } catch(e) {
+    chipsEl.innerHTML=`<span style="color:#f87171;font-size:12px">Error: ${esc(e.message)}</span>`;
+  }
+}
+
+async function addSelectedBridges() {
+  if(!curSession) return;
+  const s=loadSettings();
+  if(s.provider!=='ollama'&&s.provider!=='lmstudio'&&!s.apiKey){ openSettings(); return; }
+  const checked=[...document.querySelectorAll('.bridge-chip-cb:checked')];
+  if(!checked.length) return;
+  const topics=checked.map(cb=>JSON.parse(cb.dataset.json.replace(/&#39;/g,"'")));
+  const btn=document.querySelector('#bridge-chip-action .primary-btn');
+  if(btn){ btn.disabled=true; btn.textContent='Generating...'; }
+  try {
+    const res=await llmComplete(`Interview coach for ${curSession.analysis?.role||'role'} at ${curSession.analysis?.company||'company'}.
+Candidate: ${curSession.resumeSummary?.substring(0,200)||''}.
+Generate full bridge cards for: ${topics.map(t=>t.title).join(', ')}.
+Return JSON: {"bridges":[{"id":"b_ex_1","color":"#3b82f6","badge":"BADGE","title":"...","sub":"...","know":"...","nvidia":"...","detail":["para1","para2"],"bridge":"...","dontSay":"...","instead":"..."}]}`);
+    addCost(res.usage);
+    const data=parseJSON(res.content);
+    (data.bridges||[]).forEach(b=>{
+      if(!curSession.bridges.find(x=>x.id===b.id)){ curSession.bridges.push(b); curSession.confidence[b.id]='fuzzy'; }
+    });
+    autoSave(); updateProgress();
+    document.getElementById('bridge-chips').style.display='none';
+    document.getElementById('bridge-chip-action').style.display='none';
+    renderSkillsMap();
+  } catch(e) {
+    if(btn){ btn.disabled=false; btn.textContent='Add selected →'; }
+    alert('Error: '+e.message);
+  }
+}
+
+// ═══ SUGGEST MORE QUESTIONS ═══
+async function suggestMoreQuestions(section) {
+  if(!curSession) return;
+  const s=loadSettings();
+  if(s.provider!=='ollama'&&s.provider!=='lmstudio'&&!s.apiKey){ openSettings(); return; }
+  const chipsEl=document.getElementById('qchips-'+section);
+  const actionEl=document.getElementById('qchip-action-'+section);
+  chipsEl.style.display='block';
+  chipsEl.innerHTML='<span style="color:var(--muted2);font-size:12px">⟳ Loading...</span>';
+  try {
+    const existing=curSession.mockInterview.filter(q=>q.section===section).map(q=>q.question.substring(0,60)).join('; ');
+    const res=await llmComplete(`Interview coach for ${curSession.analysis?.role||'role'} at ${curSession.analysis?.company||'company'}.
+Existing ${section} questions: ${existing}. Suggest 5 new ${section} questions not already covered.
+Return JSON: {"questions":[{"id":"q_ex_1","text":"Full question text?"}]}`);
+    addCost(res.usage);
+    const data=parseJSON(res.content);
+    const qs=data.questions||[];
+    if(!qs.length){ chipsEl.innerHTML='<span style="color:var(--muted2);font-size:12px">No suggestions.</span>'; return; }
+    chipsEl.innerHTML=qs.map(q=>`<label class="chip-label"><input type="checkbox" class="qchip-cb" data-section="${section}" value="${esc(q.id)}" data-text="${esc(q.text)}"> ${esc(q.text.substring(0,70))}${q.text.length>70?'…':''}</label>`).join('');
+    actionEl.style.display='block';
+  } catch(e) {
+    chipsEl.innerHTML=`<span style="color:#f87171;font-size:12px">Error: ${esc(e.message)}</span>`;
+  }
+}
+
+async function addSelectedQuestions(section) {
+  if(!curSession) return;
+  const s=loadSettings();
+  if(s.provider!=='ollama'&&s.provider!=='lmstudio'&&!s.apiKey){ openSettings(); return; }
+  const checked=[...document.querySelectorAll(`.qchip-cb[data-section="${section}"]:checked`)];
+  if(!checked.length) return;
+  const qTexts=checked.map(cb=>cb.dataset.text);
+  const btn=document.querySelector(`#qchip-action-${section} .primary-btn`);
+  if(btn){ btn.disabled=true; btn.textContent='Generating...'; }
+  try {
+    const res=await llmComplete(`Interview coach for ${curSession.analysis?.role||'role'} at ${curSession.analysis?.company||'company'}.
+Candidate: ${curSession.resumeSummary?.substring(0,200)||''}.
+Generate full question cards for:\n${qTexts.map((q,i)=>`Q${i+1}: ${q}`).join('\n')}
+Return JSON: {"questions":[{"id":"q_ex_1","section":"${section}","question":"...","suggestedAnswer":"...","starHint":"..."}]}`);
+    addCost(res.usage);
+    const data=parseJSON(res.content);
+    (data.questions||[]).forEach(q=>{
+      q.section=section;
+      if(!curSession.mockInterview.find(x=>x.id===q.id)){ curSession.mockInterview.push(q); curSession.practiceStatus[q.id]=null; }
+    });
+    autoSave();
+    document.getElementById('qchips-'+section).style.display='none';
+    document.getElementById('qchip-action-'+section).style.display='none';
+    renderMockInterview();
+  } catch(e) {
+    if(btn){ btn.disabled=false; btn.textContent='Add selected →'; }
+    alert('Error: '+e.message);
+  }
+}
+
+// ═══ SUGGEST MORE TOPICS (CONCEPT MAP) ═══
+async function suggestMoreTopics() {
+  if(!curSession) return;
+  const s=loadSettings();
+  if(s.provider!=='ollama'&&s.provider!=='lmstudio'&&!s.apiKey){ openSettings(); return; }
+  const btn=document.querySelector('#tab-concept .mini-btn');
+  const wrap=btn?.parentElement;
+  if(!wrap) return;
+  const orig=wrap.innerHTML;
+  wrap.innerHTML='<span style="color:var(--muted2);font-size:12px;padding:8px">⟳ Loading suggestions...</span>';
+  try {
+    const existing=cmNodes.map(n=>n.label).join(', ');
+    const res=await llmComplete(`Interview coach. Role: ${curSession.analysis?.role||'professional'}, Company: ${curSession.analysis?.company||''}.
+Existing concept map topics: ${existing}.
+Suggest 5 new topics that add value to this map.
+Return JSON: {"topics":[{"id":"cm_ex_1","label":"Short Label","sub":"subtitle","cat":"${Object.keys(cmCATS)[0]||'default'}","desc":"2-3 sentence description","tip":"interview tip"}]}`);
+    addCost(res.usage);
+    const data=parseJSON(res.content);
+    const topics=data.topics||[];
+    if(!topics.length){ wrap.innerHTML=orig; return; }
+    wrap.innerHTML=
+      `<div style="font-size:11px;color:var(--muted2);padding:6px 0">Select topics to add:</div>`+
+      topics.map(t=>`<label class="chip-label"><input type="checkbox" class="cm-chip-cb" data-json='${JSON.stringify(t).replace(/'/g,"&#39;")}'> ${esc(t.label)}</label>`).join('')+
+      `<button class="primary-btn" style="margin-top:8px;padding:7px 16px;font-size:12px" onclick="addSelectedTopics()">Add selected →</button>`;
+  } catch(e) {
+    wrap.innerHTML=`<span style="color:#f87171;font-size:12px">Error: ${esc(e.message)}</span>`;
+    setTimeout(()=>{ wrap.innerHTML=orig; },3000);
+  }
+}
+
+async function addSelectedTopics() {
+  if(!curSession) return;
+  const s=loadSettings();
+  if(s.provider!=='ollama'&&s.provider!=='lmstudio'&&!s.apiKey){ openSettings(); return; }
+  const checked=[...document.querySelectorAll('.cm-chip-cb:checked')];
+  if(!checked.length) return;
+  const topics=checked.map(cb=>JSON.parse(cb.dataset.json.replace(/&#39;/g,"'")));
+  const existing=cmNodes.map(n=>n.id).join(', ');
+  try {
+    const res=await llmComplete(`Interview coach. Role: ${curSession.analysis?.role||'professional'} at ${curSession.analysis?.company||''}.
+Generate concept map nodes and edges for: ${topics.map(t=>t.label).join(', ')}.
+Connect to existing nodes where relevant. Existing node ids: ${existing}.
+Return JSON: {"nodes":[{"id":"cm_ex_1","label":"...","sub":"...","cat":"${Object.keys(cmCATS)[0]||'default'}","x":400,"y":300,"desc":"...","tip":"..."}],"edges":[{"f":"existing_id","t":"cm_ex_1","lbl":"relates to","col":"#888"}]}`);
+    addCost(res.usage);
+    const data=parseJSON(res.content);
+    (data.nodes||[]).forEach(n=>{
+      if(!cmNodes.find(x=>x.id===n.id)){
+        n.knowledge='fuzzy'; n.cat=n.cat||(Object.keys(cmCATS)[0]||'default');
+        if(!n.x) n.x=150+Math.random()*500; if(!n.y) n.y=150+Math.random()*400;
+        cmNodes.push(n); curSession.conceptMap.nodes.push(n);
+      }
+    });
+    (data.edges||[]).forEach(e=>{ cmBaseEdges.push(e); curSession.conceptMap.edges.push(e); });
+    autoSave(); cmRenderLegend(); cmRenderNlist(); cmDraw();
+  } catch(e) { alert('Error: '+e.message); }
+}
+
+// ═══ PROMPT AREA ═══
+function updatePrompt() {
+  const area=document.getElementById('prompt-area');
+  const out=document.getElementById('prompt-out');
+  if(!area||!out) return;
+  if(!curSession){ area.style.display='none'; return; }
+
+  const conf=curSession.confidence||{};
+  const bridgeMap={}; curSession.bridges.forEach(b=>bridgeMap[b.id]=b.title);
+  const storyMap={}; (curSession.stories||[]).forEach(s=>storyMap[s.id]=s.title);
+  const getId=id=>bridgeMap[id]||storyMap[id]||id;
+
+  const solidIds=Object.keys(conf).filter(k=>!k.startsWith('cm_')&&conf[k]==='solid');
+  const fuzzyIds=Object.keys(conf).filter(k=>!k.startsWith('cm_')&&conf[k]==='fuzzy');
+
+  const cmSolid=cmNodes.filter(n=>n.knowledge==='know').map(n=>n.label);
+  const cmFuzzy=cmNodes.filter(n=>n.knowledge==='fuzzy').map(n=>n.label);
+  const cmUnk=cmNodes.filter(n=>n.knowledge==='unknown').map(n=>n.label);
+
+  const lines=[];
+  lines.push(`I am preparing for a ${curSession.analysis?.role||'role'} interview at ${curSession.analysis?.company||'a company'} (${curSession.analysis?.seniority||'mid-level'}).`);
+  if(solidIds.length) lines.push(`Solid topics: ${solidIds.map(getId).join(', ')}.`);
+  if(fuzzyIds.length) lines.push(`Still working on: ${fuzzyIds.map(getId).join(', ')}.`);
+  if(cmSolid.length) lines.push(`\nConcept map — know well: ${cmSolid.join(', ')}.`);
+  if(cmFuzzy.length) lines.push(`Need to deepen: ${cmFuzzy.join(', ')}.`);
+  if(cmUnk.length) lines.push(`Have gaps in: ${cmUnk.join(', ')}.`);
+  const focus=[...cmFuzzy,...cmUnk].slice(0,6);
+  if(focus.length) {
+    lines.push(`\nFor each concept I am fuzzy on or don't know (${focus.join(', ')}), please give:\n  1. Concise technical definition with key specs\n  2. How it connects to what I know\n  3. Key interview talking points: tradeoffs, design decisions, performance implications\n  4. A concrete example to anchor the concept\n\nBe direct and technical — I am a senior engineer.`);
+  }
+  out.textContent=lines.join('\n');
+
+  const copyBtn=document.getElementById('copy-prompt-btn');
+  if(copyBtn && !copyBtn._bound) {
+    copyBtn._bound=true;
+    copyBtn.addEventListener('click',()=>{
+      navigator.clipboard.writeText(out.textContent).then(()=>{
+        copyBtn.textContent='Copied!';
+        setTimeout(()=>{ copyBtn.textContent='Copy Prompt'; },2200);
+      });
+    });
+  }
+}
+
+// ═══ DOWNLOAD HTML ═══
+function downloadCurrentSession() {
+  if(!curSession){ alert('No session to download.'); return; }
+  downloadSessionHTML(curSession);
+}
+
+function downloadSessionHTML(session) {
+  const slug=(session.title||'prep').replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase().substring(0,50);
+  const html=buildExportHTML(session);
+  const blob=new Blob([html],{type:'text/html'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='interview-prep-'+slug+'.html';
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+
+function buildExportHTML(session) {
+  const cssText=(document.head.querySelector('style')||{}).textContent||'';
+  const tok=(session.tokenStats?.promptTokens||0)+(session.tokenStats?.completionTokens||0);
+  const cost=session.tokenStats?.estimatedCostUSD||0;
+  const titleEsc=esc(session.title||'Interview Prep');
+  const dataJson=JSON.stringify(session).replace(/<\/script>/gi,'<\\/script>');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${titleEsc} — Interview Prep Export</title>
+<!-- Generated by Interview Prep App | ${titleEsc} | ${tok} tokens (~\$${cost.toFixed(4)}) -->
+<style>
+${cssText}
+body{overflow:auto}
+#sidebar{display:none}
+#screen-setup,#screen-clarify,#screen-gen{display:none!important}
+#screen-prep{display:flex!important}
+#tab-bar{display:flex}
+#prog-wrap{display:flex}
+#prompt-area{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="main-area">
+<header id="top-bar">
+  <span id="top-title"><em>Interview</em> Prep — ${titleEsc}</span>
+  <div class="spacer"></div>
+  <div id="prog-wrap"><span id="prog-lbl">0 / 0 solid</span><div id="prog-bar-el"><div id="prog-fill-el" style="width:0%"></div></div></div>
+  <button class="icon-btn" id="hc-btn" onclick="toggleHC()" title="Toggle high contrast">◑</button>
+</header>
+<div id="tab-bar">
+  <button class="tab-btn on" data-tab="skills">🔄 Skills Map</button>
+  <button class="tab-btn" data-tab="stories">🎯 Stories</button>
+  <button class="tab-btn" data-tab="mock">❓ Mock Interview</button>
+</div>
+<div id="screen-prep" class="screen" style="padding:0;display:flex;flex-direction:column;overflow:hidden">
+  <div id="tab-skills" class="tab-pane screen" style="padding:16px"></div>
+  <div id="tab-stories" class="tab-pane screen hidden" style="padding:16px"></div>
+  <div id="tab-mock" class="tab-pane screen hidden" style="padding:16px"></div>
+</div>
+</div>
+</div>
+<script>
+var curSession=${dataJson};
+var KL_CONF=['unknown','fuzzy','solid'];
+var KL_CONF_LABELS={'unknown':'?','fuzzy':'~','solid':'\\u2713'};
+function autoSave(){}
+function diveDeeper(){}
+function suggestMoreBridges(){}
+function addSelectedBridges(){}
+function suggestMoreQuestions(){}
+function addSelectedQuestions(){}
+function updatePrompt(){}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function toggleHC(){document.body.classList.toggle('hc');}
+function updateProgress(){
+  if(!curSession)return;
+  var all=[...(curSession.bridges||[]),...(curSession.stories||[]).filter(s=>s.type==='story')];
+  var solid=all.filter(i=>curSession.confidence[i.id]==='solid').length;
+  var l=document.getElementById('prog-lbl'),f=document.getElementById('prog-fill-el');
+  if(l)l.textContent=solid+' / '+all.length+' solid';
+  if(f)f.style.width=(all.length?solid/all.length*100:0)+'%';
+}
+function cycleConf(id){
+  if(!curSession)return;
+  var cur=curSession.confidence[id]||'fuzzy';
+  curSession.confidence[id]=KL_CONF[(KL_CONF.indexOf(cur)+1)%3];
+  updateAllConfDots();updateProgress();
+}
+function updateAllConfDots(){
+  document.querySelectorAll('.conf-dot[data-id]').forEach(function(dot){
+    var id=dot.dataset.id,v=curSession&&curSession.confidence[id]||'fuzzy';
+    dot.className='conf-dot '+v;
+    if(document.body.classList.contains('hc'))dot.textContent=(v==='solid'?'\\u2713 Solid':v==='fuzzy'?'~ Fuzzy':'? Unknown');
+  });
+}
+function renderSkillsMap(){
+  var container=document.getElementById('tab-skills');
+  if(!curSession||!curSession.bridges.length){container.innerHTML='<div style="color:#5a5a75;font-size:13px;padding:20px">No skills map data.</div>';return;}
+  var deck=document.createElement('div');deck.className='deck';
+  curSession.bridges.forEach(function(b,i){
+    var exp=curSession.expanded[b.id],conf=curSession.confidence[b.id]||'fuzzy';
+    var card=document.createElement('div');
+    card.className='bcard'+(exp?' expanded':'')+(i<3?' day1-card':' day2-card');
+    card.dataset.id=b.id;
+    var detOpen=curSession.expanded['detail_'+b.id];
+    card.innerHTML='<div class="bcard-hdr" data-action="expand" data-id="'+b.id+'"><span class="topic-badge" style="background:'+b.color+'22;color:'+b.color+';border:1px solid '+b.color+'44">'+esc(b.badge||'')+'</span><div class="card-title"><h4>'+esc(b.title)+'</h4><span>'+esc(b.sub||'')+'</span></div><div class="conf-dot '+conf+'" data-id="'+b.id+'" data-action="conf" title="Click to cycle confidence"></div><span class="expand-icon">&#9660;</span></div><div class="bcard-body"><div class="two-col"><div class="col-box"><h5 style="color:'+b.color+'aa">YOU KNOW</h5><p>'+esc(b.know||'')+'</p></div><div class="col-box"><h5 style="color:#60a0ff">ROLE NEEDS</h5><p>'+esc(b.nvidia||b.role||'')+'</p></div></div><div class="detail-section'+(detOpen?' open':'')+'" data-id="'+b.id+'"><div class="detail-toggle" data-action="detail" data-id="'+b.id+'"><span>&#9658;</span> Deep Dive</div><div class="detail-content">'+(b.detail||[]).map(function(p){return'<p>'+esc(p)+'</p>';}).join('')+'</div></div><div class="bridge-row"><div class="br-lbl">&#128172; Your Bridge</div><p>'+esc(b.bridge||'')+'</p></div><div class="dont-row"><div class="dr-lbl">&#9888; Don\'t Say</div><p>'+esc(b.dontSay||'')+'</p><div class="instead">&#10003; Instead: '+esc(b.instead||'')+'</div></div></div>';
+    deck.appendChild(card);
+  });
+  container.innerHTML='';container.appendChild(deck);
+  updateAllConfDots();
+  container.addEventListener('click',function(e){
+    var action=e.target.closest('[data-action]')&&e.target.closest('[data-action]').dataset.action;
+    var id=e.target.closest('[data-id]')&&e.target.closest('[data-id]').dataset.id;
+    if(!action||!id)return;
+    if(action==='conf'){e.stopPropagation();cycleConf(id);return;}
+    if(action==='expand'){curSession.expanded[id]=!curSession.expanded[id];renderSkillsMap();return;}
+    if(action==='detail'){e.stopPropagation();curSession.expanded['detail_'+id]=!curSession.expanded['detail_'+id];renderSkillsMap();return;}
+  },{once:true});
+}
+function renderStories(){
+  var container=document.getElementById('tab-stories');
+  if(!curSession||!curSession.stories.length){container.innerHTML='<div style="color:#5a5a75;font-size:13px;padding:20px">No stories.</div>';return;}
+  container.innerHTML='';
+  curSession.stories.forEach(function(s){
+    if(s.type==='pitch'){
+      var card=document.createElement('div');card.className='pitch-card';
+      card.innerHTML='<h3>&#127919; '+esc(s.title||'Pitch')+'</h3><div class="pitch-body">'+(s.pitch||'')+'</div><div class="pitch-hint">&#127911; '+esc(s.hint||'Practice saying this aloud for 45 seconds.')+'</div>';
+      container.appendChild(card);return;
+    }
+    var mode=curSession.storyMode[s.id]||'yours',isOpen=curSession.expanded['s_'+s.id],conf=curSession.confidence[s.id]||'fuzzy';
+    var data=mode==='role'?s.role:s.yours;
+    var card=document.createElement('div');card.className='scard'+(isOpen?' open':'');
+    var labels=['Situation','Task','Action','Result'];
+    card.innerHTML='<div class="scard-hdr" data-action="sexp" data-id="'+s.id+'"><div class="scard-num" style="background:'+(s.numColor||'#22c55e')+'22;color:'+(s.numColor||'#22c55e')+'">'+(s.num||'01')+'</div><div class="scard-title"><h4>'+esc(s.title)+'</h4><span>'+esc(s.context||'')+'</span></div><button class="toggle-btn'+(mode==='role'?' role-mode':'')+'" data-action="toggle" data-id="'+s.id+'">'+(mode==='yours'?'&#x1F504; Your Words':'&#x1F7E2; Role Framing')+'</button><div class="conf-dot '+conf+'" data-id="'+s.id+'" data-action="conf"></div><span class="expand-icon">&#9660;</span></div><div class="scard-body"><div class="star-grid">'+['s','t','a','r'].map(function(k,i){return'<div class="star-box'+(mode==='role'?' role-s':'')+'"><h5 style="color:'+(mode==='role'?'#40a060':(s.numColor||'#22c55e'))+'aa">'+labels[i]+'</h5><p>'+esc((data&&data[k])||'')+'</p></div>';}).join('')+'</div><div class="ktp-box"><h5>Key Talking Points</h5><ul>'+(s.ktp||[]).map(function(k){return'<li>'+esc(k)+'</li>';}).join('')+'</ul></div></div>';
+    container.appendChild(card);
+  });
+  updateAllConfDots();
+  container.addEventListener('click',function(e){
+    var action=e.target.closest('[data-action]')&&e.target.closest('[data-action]').dataset.action;
+    var id=e.target.closest('[data-id]')&&e.target.closest('[data-id]').dataset.id;
+    if(!action||!id)return;
+    if(action==='conf'){e.stopPropagation();cycleConf(id);return;}
+    if(action==='sexp'){curSession.expanded['s_'+id]=!curSession.expanded['s_'+id];renderStories();return;}
+    if(action==='toggle'){e.stopPropagation();curSession.storyMode[id]=curSession.storyMode[id]==='yours'?'role':'yours';renderStories();return;}
+  },{once:true});
+}
+function setPractice(id,status){
+  if(!curSession)return;
+  curSession.practiceStatus[id]=curSession.practiceStatus[id]===status?null:status;
+  renderMockInterview();
+}
+function toggleMockSection(key){
+  curSession.expanded['msec_'+key]=!(curSession.expanded['msec_'+key]!==false);
+  var el=document.getElementById('msec-'+key);if(el)el.classList.toggle('open');
+}
+function toggleQAns(id){
+  curSession.expanded['qa_'+id]=!curSession.expanded['qa_'+id];
+  var el=document.getElementById('qa-'+id);if(el)el.classList.toggle('open');
+  var btn=el&&el.previousElementSibling&&el.previousElementSibling.querySelector('.ans-btn');
+  if(btn)btn.textContent=curSession.expanded['qa_'+id]?'&#9660; Hide Answer':'&#9658; Show Answer';
+}
+function renderMockInterview(){
+  var container=document.getElementById('tab-mock');
+  if(!curSession||!curSession.mockInterview.length){container.innerHTML='<div style="color:#5a5a75;font-size:13px;padding:20px">No mock interview questions.</div>';return;}
+  var sections=[{key:'technical',label:'Technical Questions',color:'#3b82f6'},{key:'behavioral',label:'Behavioral Questions',color:'#22c55e'},{key:'scenario',label:'Scenario Questions',color:'#a855f7'}];
+  container.innerHTML='';
+  sections.forEach(function(sec){
+    var qs=curSession.mockInterview.filter(function(q){return q.section===sec.key;});
+    if(!qs.length)return;
+    var secEl=document.createElement('div');secEl.className='mock-section';
+    var isOpen=curSession.expanded['msec_'+sec.key]!==false;
+    secEl.innerHTML='<div class="mock-section-hdr" onclick="toggleMockSection(\''+sec.key+'\')"><h4 style="color:'+sec.color+'">'+sec.label+'</h4><span class="sec-badge" style="background:'+sec.color+'22;color:'+sec.color+'">'+qs.length+' Qs</span><span style="font-size:11px;color:var(--muted2)">'+(isOpen?'&#9650;':'&#9660;')+'</span></div><div class="mock-questions'+(isOpen?' open':'')+'" id="msec-'+sec.key+'">'+qs.map(function(q){var st=curSession.practiceStatus[q.id];var ansOpen=curSession.expanded['qa_'+q.id];return'<div class="qcard" id="qcard-'+q.id+'"><div class="qcard-top"><div class="qcard-q">'+esc(q.question)+'</div>'+(st?'<span class="qstat '+(st==='nailed'?'nailed':'needs')+'">'+(st==='nailed'?'&#10003; Nailed':'&#8635; Practice')+'</span>':'')+'</div><div class="qcard-btns"><button class="ans-btn" onclick="toggleQAns(\''+q.id+'\')">'+(ansOpen?'&#9660; Hide Answer':'&#9658; Show Answer')+'</button><button class="p-btn nail" onclick="setPractice(\''+q.id+'\',\'nailed\')">&#10003; Nailed it</button><button class="p-btn needs" onclick="setPractice(\''+q.id+'\',\'needs-work\')">&#8635; More Practice</button></div><div class="qcard-ans'+(ansOpen?' open':'')+'" id="qa-'+q.id+'">'+esc(q.suggestedAnswer||'')+(q.starHint?'<div class="star-hint">&#128161; '+esc(q.starHint)+'</div>':'')+'</div></div>';}).join('')+'</div>';
+    container.appendChild(secEl);
+  });
+}
+document.querySelectorAll('.tab-btn').forEach(function(btn){
+  btn.addEventListener('click',function(){
+    var t=btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.toggle('on',b===btn);});
+    document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.toggle('hidden',p.id!=='tab-'+t);});
+  });
+});
+renderSkillsMap();renderStories();renderMockInterview();updateProgress();
+<\/script>
+</body>
+</html>`;
+}
+
+// ═══ APP INIT ═══
+(function appInit() {
+  // Apply config.js overrides if present
+  if(window.PREP_CONFIG) {
+    const s=loadSettings();
+    if(window.PREP_CONFIG.provider) s.provider=window.PREP_CONFIG.provider;
+    if(window.PREP_CONFIG.apiKey) s.apiKey=window.PREP_CONFIG.apiKey;
+    if(window.PREP_CONFIG.model) s.model=window.PREP_CONFIG.model;
+    persistSettings(s);
+  }
+  // Restore high contrast
+  if(loadSettings().highContrast) {
+    document.body.classList.add('hc');
+    document.getElementById('hc-btn')?.classList.add('on');
+  }
+  // Populate model dropdown
+  updateModelList();
+  // Render history sidebar
+  renderHistory();
+  // Start on setup screen
+  showScreen('setup');
+  // Tab switching — note: inline listener already added in p3, this handles concept map init
+  // p3 switchTab already handles initConceptMap for concept tab
+  // Token cost interval update
+  setInterval(()=>{
+    if(sessionCost.model||sessionCost.promptTokens>0) {
+      const tok=sessionCost.promptTokens+sessionCost.completionTokens;
+      const el=document.getElementById('token-note');
+      if(el&&el.textContent==='Waiting...') return;
+      if(el) el.textContent=`${fmtTokens(tok)} tokens | ~${fmtCost(calcCost(sessionCost.model,sessionCost.promptTokens,sessionCost.completionTokens))}`;
+    }
+  },2000);
+})();
