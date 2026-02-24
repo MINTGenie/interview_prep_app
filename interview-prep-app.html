@@ -1449,8 +1449,10 @@ function initConceptMap() {
     cmCATS = { default: { label:'Topics', color:'#3b82f6' } };
   }
   // Build nodes (preserve existing knowledge state from confidence map)
-  cmNodes = (cm.nodes||[]).map(n => ({
+  cmNodes = (cm.nodes||[]).map((n,i) => ({
     ...n,
+    x: n.x || (150 + (i % 5) * 160),
+    y: n.y || (150 + Math.floor(i / 5) * 160),
     cat: n.cat || (Object.keys(cmCATS)[0]||'default'),
     knowledge: curSession.confidence['cm_'+n.id] || 'fuzzy'
   }));
@@ -1873,7 +1875,7 @@ function cmReset() {
 function showConceptMapTab() {
   if(!cmInitialized) {
     initConceptMap();
-    setTimeout(()=>{ cmFitToScreen(); },100);
+    setTimeout(()=>{ cmForceLayout(); },100);
   } else {
     setTimeout(()=>{ cmResize(); cmFitToScreen(); },50);
   }
