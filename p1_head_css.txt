@@ -30,10 +30,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:system-
 .hitem{padding:6px 8px;border-radius:6px;cursor:pointer;transition:background .15s;position:relative;border:1px solid transparent}
 .hitem:hover{background:rgba(255,255,255,.06);border-color:var(--border)}
 .hitem.active{background:rgba(249,115,22,.1);border-color:rgba(249,115,22,.3)}
-.hitem-title{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:18px}
+.hitem-title{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:40px}
 .hitem-meta{font-size:10px;color:var(--muted2);margin-top:2px;display:flex;gap:8px}
 .hitem-del{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;width:18px;height:18px;background:#3a1515;color:#e06060;border:none;border-radius:3px;cursor:pointer;font-size:10px;line-height:18px;text-align:center}
+.hitem-dl{position:absolute;right:28px;top:50%;transform:translateY(-50%);display:none;width:18px;height:18px;background:#0f1f10;color:#3a8a4a;border:none;border-radius:3px;cursor:pointer;font-size:11px;line-height:18px;text-align:center}
 .hitem:hover .hitem-del{display:block}
+.hitem:hover .hitem-dl{display:block}
 #sb-footer{padding:8px;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:5px}
 .sb-btn{width:100%;padding:6px 10px;background:var(--s2);color:var(--muted2);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:11px;text-align:left;transition:all .15s}
 .sb-btn:hover{background:var(--s3);color:var(--text)}

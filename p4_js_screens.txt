@@ -168,9 +168,15 @@ function renderHistory() {
     return `<div class="hitem${curSession&&s.id===curSession.id?' active':''}" data-id="${s.id}" onclick="loadSessionById('${s.id}')">
       <div class="hitem-title">${esc(s.title)}</div>
       <div class="hitem-meta"><span>${relTime(s.createdAt)}</span><span>${fmtTokens(tok)} tok</span><span>${fmtCost(usd)}</span></div>
+      <button class="hitem-dl" title="Download as HTML" onclick="event.stopPropagation();downloadById('${s.id}')">⬇</button>
       <button class="hitem-del" title="Delete" onclick="event.stopPropagation();requestDelete('${s.id}')">✕</button>
     </div>`;
   }).join('');
+}
+
+function downloadById(id) {
+  const arr=loadSessions(); const s=arr.find(x=>x.id===id);
+  if(s) downloadSessionHTML(s);
 }
 
 function requestDelete(id) {
