@@ -363,33 +363,30 @@ function staticMock(session) {
 }
 
 function staticConcept(session) {
-  var cm=session.conceptMap||{nodes:[],edges:[],categories:[]};
-  if(!cm.nodes||!cm.nodes.length) return '<div style="color:#5a5a75;font-size:13px;padding:20px">No concept map data.</div>';
-  var cats=cm.categories||[];
-  var defaultColor='#60a0ff';
-  var byCat={};
-  cm.nodes.forEach(function(n){var cat=n.cat||'other';if(!byCat[cat])byCat[cat]=[];byCat[cat].push(n);});
-  var html='<div style="max-width:900px">';
-  Object.keys(byCat).forEach(function(catKey){
-    var catInfo=(Array.isArray(cats)?cats.find(function(c){return c.id===catKey;}):cats[catKey])||{label:catKey,color:defaultColor};
-    var color=catInfo.color||defaultColor;
-    var nodes=byCat[catKey];
-    html+='<div style="margin-bottom:20px"><h4 style="color:'+color+';font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid '+color+'44">'+esc(catInfo.label||catKey)+' &nbsp;('+nodes.length+')</h4>';
-    html+='<div style="display:flex;flex-wrap:wrap;gap:8px">';
-    nodes.forEach(function(n){html+='<span style="background:'+color+'18;color:'+color+';border:1px solid '+color+'44;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500">'+esc(n.label||n.id)+'</span>';});
-    html+='</div></div>';
-  });
-  if(cm.edges&&cm.edges.length){
-    var nodeMap={};cm.nodes.forEach(function(n){nodeMap[n.id]=n.label||n.id;});
-    html+='<div style="margin-top:8px;padding-top:16px;border-top:1px solid var(--border)"><h4 style="color:var(--muted2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Key Connections</h4><div style="display:flex;flex-wrap:wrap;gap:6px">';
-    cm.edges.forEach(function(e){
-      var fl=nodeMap[e.f||e.from]||e.f||e.from||'',tl=nodeMap[e.t||e.to]||e.t||e.to||'';
-      var lbl=e.lbl||e.label||'';
-      html+='<div style="background:var(--s2);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:11px;color:var(--muted2)">'+esc(fl)+' &rarr; '+esc(tl)+(lbl?'&nbsp;<em style="color:var(--muted)">'+esc(lbl)+'</em>':'')+'</div>';
-    });
-    html+='</div></div>';
-  }
-  html+='</div>';return html;
+  // The canvas will be initialized by initConceptMap() using curSession data
+  // We just need the HTML structure — no pre-rendered content
+  return '<div id="concept-wrap">' +
+    '<div id="cm-canvas-wrap">' +
+      '<canvas id="cm-cv"></canvas>' +
+      '<div id="cm-tip">' +
+        '<div class="t-title"></div>' +
+        '<div class="t-sub"></div>' +
+        '<hr style="border-color:#2a2a40;margin:6px 0">' +
+        '<div class="t-desc"></div>' +
+        '<div class="t-tip"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div id="cm-sidebar">' +
+      '<div class="cm-actions">' +
+        '<button class="cm-btn" onclick="cmFitToScreen()">&#x229E; Fit</button>' +
+        '<button class="cm-btn" onclick="cmForceLayout()">&#x21BA; Layout</button>' +
+        '<button class="cm-btn" id="cm-edge-btn" onclick="cmToggleEdgeMode()">&#x2192; Edge</button>' +
+        '<button class="cm-btn" onclick="cmReset()">&#x2715; Reset</button>' +
+      '</div>' +
+      '<div id="cm-legend"></div>' +
+      '<div id="cm-node-list" style="overflow-y:auto;flex:1"></div>' +
+    '</div>' +
+  '</div>';
 }
 
 function buildExportHTML(session) {
@@ -402,6 +399,7 @@ function buildExportHTML(session) {
   const storiesHtml=staticStories(session);
   const mockHtml=staticMock(session);
   const conceptHtml=staticConcept(session);
+  const cmExportSrc=window._cmSrc||'';
   return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -424,6 +422,9 @@ html,body{height:auto!important;overflow:auto!important}
 .bcard{display:block!important}
 .bcard-body{display:block!important}
 .scard-body{display:block!important}
+#concept-wrap{height:calc(100vh - 130px)!important;display:flex!important}
+#cm-canvas-wrap{flex:1!important;overflow:hidden!important}
+#cm-sidebar{display:flex!important;flex-direction:column!important}
 </style></head>
 <body><div id="app"><div id="main-area">
 <header id="top-bar">
@@ -518,11 +519,13 @@ function setPractice(id,status){
   var existing=el.querySelector('.qstat');if(existing)existing.remove();
   if(st){var sp=document.createElement('span');sp.className='qstat '+(st==='nailed'?'nailed':'needs');sp.innerHTML=st==='nailed'?'&#10003; Nailed':'&#8635; Practice';el.querySelector('.qcard-top').appendChild(sp);}
 }
+${cmExportSrc}
 document.querySelectorAll('.tab-btn').forEach(function(btn){
   btn.addEventListener('click',function(){
     var t=btn.dataset.tab;
     document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.toggle('on',b===btn);});
     document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.toggle('hidden',p.id!=='tab-'+t);});
+    if(t==='concept'&&typeof initConceptMap==='function'){setTimeout(initConceptMap,50);}
   });
 });
 updateProgress();
