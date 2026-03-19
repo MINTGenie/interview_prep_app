@@ -67,6 +67,7 @@
 <div id="app">
   <!-- SIDEBAR -->
   <aside id="sidebar">
+    <div id="sb-resize" title="Drag to resize sidebar"></div>
     <div id="sb-top">
       <button id="new-btn" onclick="startNewSession()">＋ New Session</button>
     </div>

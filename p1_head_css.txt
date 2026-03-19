@@ -21,7 +21,9 @@ body.hc{
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
 #app{display:flex;height:100vh;overflow:hidden}
-#sidebar{width:var(--sb);flex-shrink:0;background:var(--s1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+#sidebar{position:relative;width:var(--sb);flex-shrink:0;background:var(--s1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+#sb-resize{position:absolute;right:-4px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:100;background:transparent}
+#sb-resize:hover,#sb-resize.dragging{background:rgba(100,200,100,0.25)}
 #sb-top{padding:10px;border-bottom:1px solid var(--border);flex-shrink:0}
 #new-btn{width:100%;padding:8px;background:#1a2a3a;color:#60a0d0;border:1px solid #2a3a55;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s}
 #new-btn:hover{background:#1e3045;color:#80b0e0}
