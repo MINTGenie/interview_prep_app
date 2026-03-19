@@ -163,33 +163,37 @@ function cmDrawGrid() {
     }
 }
 
-function cmDrawEdge(e) {
+// phase 1 = line + arrowhead only; phase 2 = label pill only
+// Two-pass drawing ensures labels are always rendered AFTER node glows,
+// preventing the hover shadow from painting over edge label pills.
+function cmDrawEdge(e, phase) {
   const fn=cmNodeById(e.f), tn=cmNodeById(e.t);
   if(!fn||!tn||!cmVisible(fn)||!cmVisible(tn)) return;
   const sp=cmEdgePt(fn.x,fn.y,tn.x,tn.y,5);
   const ep=cmEdgePt(tn.x,tn.y,fn.x,fn.y,9);
   const ang=Math.atan2(ep.y-sp.y,ep.x-sp.x);
   const col=e.col||'#888';
-  const isLight=cmIsLight();
   cmCtx.save();
-  // Use higher opacity so edges are visible in both dark and light modes
-  cmCtx.strokeStyle=col+'cc'; cmCtx.lineWidth=1.4; cmCtx.setLineDash([5,4]);
-  cmCtx.beginPath(); cmCtx.moveTo(sp.x,sp.y); cmCtx.lineTo(ep.x,ep.y); cmCtx.stroke();
-  cmCtx.setLineDash([]);
-  cmCtx.fillStyle=col+'ee';
-  cmCtx.beginPath();
-  cmCtx.moveTo(ep.x,ep.y);
-  cmCtx.lineTo(ep.x-Math.cos(ang-0.35)*8,ep.y-Math.sin(ang-0.35)*8);
-  cmCtx.lineTo(ep.x-Math.cos(ang+0.35)*8,ep.y-Math.sin(ang+0.35)*8);
-  cmCtx.closePath(); cmCtx.fill();
-  if(e.lbl) {
+  if(phase===1) {
+    // Draw dashed line + arrowhead
+    cmCtx.strokeStyle=col+'cc'; cmCtx.lineWidth=1.4; cmCtx.setLineDash([5,4]);
+    cmCtx.beginPath(); cmCtx.moveTo(sp.x,sp.y); cmCtx.lineTo(ep.x,ep.y); cmCtx.stroke();
+    cmCtx.setLineDash([]);
+    cmCtx.fillStyle=col+'ee';
+    cmCtx.beginPath();
+    cmCtx.moveTo(ep.x,ep.y);
+    cmCtx.lineTo(ep.x-Math.cos(ang-0.35)*8,ep.y-Math.sin(ang-0.35)*8);
+    cmCtx.lineTo(ep.x-Math.cos(ang+0.35)*8,ep.y-Math.sin(ang+0.35)*8);
+    cmCtx.closePath(); cmCtx.fill();
+  } else if(phase===2 && e.lbl) {
+    // Draw label pill on top of everything (called after nodes are drawn)
     const mx=(sp.x+ep.x)/2, my=(sp.y+ep.y)/2;
+    const isLight=cmIsLight();
     cmCtx.font='9px system-ui'; cmCtx.textAlign='center'; cmCtx.textBaseline='middle';
     const tw=cmCtx.measureText(e.lbl).width+6;
-    // Adapt label pill background to current theme
-    cmCtx.fillStyle=isLight?'rgba(230,230,248,.95)':'rgba(10,10,20,.88)';
+    cmCtx.fillStyle=isLight?'rgba(225,225,245,.97)':'rgba(10,10,20,.92)';
     cmCtx.fillRect(mx-tw/2,my-6,tw,12);
-    cmCtx.fillStyle=col+'dd'; cmCtx.fillText(e.lbl,mx,my);
+    cmCtx.fillStyle=col+'ee'; cmCtx.fillText(e.lbl,mx,my);
   }
   cmCtx.restore();
 }
@@ -245,7 +249,10 @@ function cmDraw() {
   cmCtx.save();
   cmCtx.translate(cmTf.x,cmTf.y); cmCtx.scale(cmTf.s,cmTf.s);
   cmDrawGrid();
-  [...cmBaseEdges,...cmUserEdges].forEach(cmDrawEdge);
+  // Pass 1: edge lines + arrowheads (underneath nodes)
+  const allEdges=[...cmBaseEdges,...cmUserEdges];
+  allEdges.forEach(e=>cmDrawEdge(e,1));
+  // Edge-mode preview line
   if(cmEdgeMode && cmEdgeFrom && cmMw) {
     const fn=cmNodeById(cmEdgeFrom);
     if(fn) {
@@ -254,7 +261,9 @@ function cmDraw() {
       cmCtx.restore();
     }
   }
+  // Nodes (with hover glow) drawn over edge lines
   cmNodes.forEach(n => { if(cmVisible(n)) cmDrawNode(n); });
+  // Edge-mode source highlight on top of nodes
   if(cmEdgeMode && cmEdgeFrom) {
     const fn=cmNodeById(cmEdgeFrom);
     if(fn && cmVisible(fn)) {
@@ -262,6 +271,8 @@ function cmDraw() {
       cmRr(fn.x-CM_NW/2-4,fn.y-CM_NH/2-4,CM_NW+8,CM_NH+8,11); cmCtx.stroke(); cmCtx.restore();
     }
   }
+  // Pass 2: edge labels drawn last — always on top of nodes and their glow effects
+  allEdges.forEach(e=>cmDrawEdge(e,2));
   cmCtx.restore();
 }
 
