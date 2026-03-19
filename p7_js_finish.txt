@@ -312,11 +312,13 @@ body{overflow:auto}
 <div id="tab-bar">
   <button class="tab-btn on" data-tab="skills">🔄 Skills Map</button>
   <button class="tab-btn" data-tab="stories">🎯 Stories</button>
+  <button class="tab-btn" data-tab="concept">🗺 Concept Map</button>
   <button class="tab-btn" data-tab="mock">❓ Mock Interview</button>
 </div>
 <div id="screen-prep" class="screen" style="padding:0;display:flex;flex-direction:column;overflow:hidden">
   <div id="tab-skills" class="tab-pane screen" style="padding:16px"></div>
   <div id="tab-stories" class="tab-pane screen hidden" style="padding:16px"></div>
+  <div id="tab-concept" class="tab-pane screen hidden" style="padding:16px"></div>
   <div id="tab-mock" class="tab-pane screen hidden" style="padding:16px"></div>
 </div>
 </div>
@@ -435,6 +437,33 @@ function renderMockInterview(){
     container.appendChild(secEl);
   });
 }
+function renderConceptMapExport(){
+  var container=document.getElementById('tab-concept');
+  var cm=curSession.conceptMap||{nodes:[],edges:[],categories:{}};
+  if(!cm.nodes||!cm.nodes.length){container.innerHTML='<div style="color:#5a5a75;font-size:13px;padding:20px">No concept map data.</div>';return;}
+  var cats=cm.categories||{};
+  var defaultColor='#60a0ff';
+  var byCat={};
+  cm.nodes.forEach(function(n){var cat=n.cat||'other';if(!byCat[cat])byCat[cat]=[];byCat[cat].push(n);});
+  var html='<div style="max-width:900px">';
+  Object.keys(byCat).forEach(function(catKey){
+    var catInfo=cats[catKey]||{label:catKey,color:defaultColor};
+    var color=catInfo.color||defaultColor;
+    var nodes=byCat[catKey];
+    html+='<div style="margin-bottom:20px"><h4 style="color:'+color+';font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid '+color+'44">'+esc(catInfo.label||catKey)+' &nbsp;('+nodes.length+')</h4>';
+    html+='<div style="display:flex;flex-wrap:wrap;gap:8px">';
+    nodes.forEach(function(n){html+='<span style="background:'+color+'18;color:'+color+';border:1px solid '+color+'44;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500">'+esc(n.label||n.id)+'</span>';});
+    html+='</div></div>';
+  });
+  if(cm.edges&&cm.edges.length){
+    var nodeMap={};cm.nodes.forEach(function(n){nodeMap[n.id]=n.label||n.id;});
+    html+='<div style="margin-top:8px;padding-top:16px;border-top:1px solid var(--border)"><h4 style="color:var(--muted2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Key Connections</h4><div style="display:flex;flex-wrap:wrap;gap:6px">';
+    cm.edges.forEach(function(e){var fl=nodeMap[e.from]||e.from,tl=nodeMap[e.to]||e.to;html+='<div style="background:var(--s2);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:11px;color:var(--muted2)">'+esc(fl)+' → '+esc(tl)+(e.label?'&nbsp;<em style="color:var(--muted)">'+esc(e.label)+'</em>':'')+'</div>';});
+    html+='</div></div>';
+  }
+  html+='</div>';
+  container.innerHTML=html;
+}
 document.querySelectorAll('.tab-btn').forEach(function(btn){
   btn.addEventListener('click',function(){
     var t=btn.dataset.tab;
@@ -442,7 +471,7 @@ document.querySelectorAll('.tab-btn').forEach(function(btn){
     document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.toggle('hidden',p.id!=='tab-'+t);});
   });
 });
-renderSkillsMap();renderStories();renderMockInterview();updateProgress();
+renderSkillsMap();renderStories();renderConceptMapExport();renderMockInterview();updateProgress();
 <\/script>
 </body>
 </html>`;
