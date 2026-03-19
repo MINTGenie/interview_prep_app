@@ -119,8 +119,34 @@ function cmHitTest(sx, sy) {
 }
 
 function cmHexRgb(hex) {
-  const h = hex.replace('#','');
-  return { r:parseInt(h.slice(0,2),16), g:parseInt(h.slice(2,4),16), b:parseInt(h.slice(4,6),16) };
+  // Normalise 3-char → 6-char before parsing (#abc → #aabbcc)
+  let h = hex.replace('#','');
+  if(h.length===3) h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  return { r:parseInt(h.slice(0,2),16)||0, g:parseInt(h.slice(2,4),16)||0, b:parseInt(h.slice(4,6),16)||0 };
+}
+
+// Return an edge color that is always visible on the current canvas background.
+// In dark mode, dark LLM-generated colors are boosted; in light mode used as-is.
+function cmVisibleColor(col) {
+  const {r,g,b} = cmHexRgb(col);
+  if(cmIsLight()) {
+    // Light canvas: darken very light colors so they contrast with white background
+    const lum=(r*299+g*587+b*114)/1000;
+    if(lum > 200) {
+      const f=0.55;
+      return '#'+[Math.round(r*f),Math.round(g*f),Math.round(b*f)].map(v=>v.toString(16).padStart(2,'0')).join('');
+    }
+    return col;
+  } else {
+    // Dark canvas: brighten very dark colors so they contrast with dark background
+    const lum=(r*299+g*587+b*114)/1000;
+    if(lum < 90) {
+      // Blend toward a pastel — add a floor of 130 per channel
+      const lift=130;
+      return '#'+[Math.min(255,r+lift),Math.min(255,g+lift),Math.min(255,b+lift)].map(v=>v.toString(16).padStart(2,'0')).join('');
+    }
+    return col;
+  }
 }
 
 function cmEdgePt(cx, cy, tx, ty, margin) {
@@ -188,29 +214,30 @@ function cmDrawEdge(e, phase) {
   const sp=cmEdgePt(fn.x,fn.y,tn.x,tn.y,5);
   const ep=cmEdgePt(tn.x,tn.y,fn.x,fn.y,9);
   const ang=Math.atan2(ep.y-sp.y,ep.x-sp.x);
-  const col=e.col||'#888';
+  // Normalise col: expand 3-char hex, apply fallback, then boost for visibility
+  const rawCol = (e.col && e.col.length >= 4) ? e.col : '#888888';
+  const col = cmVisibleColor(rawCol); // guaranteed visible on current canvas
   cmCtx.save();
   if(phase===1) {
-    // Draw dashed line + arrowhead — both use the same edge color for visual consistency
-    cmCtx.strokeStyle=col+'cc'; cmCtx.lineWidth=1.4; cmCtx.setLineDash([5,4]);
+    // Draw dashed line + arrowhead — both use the same boosted color
+    cmCtx.strokeStyle=col+'dd'; cmCtx.lineWidth=1.6; cmCtx.setLineDash([5,4]);
     cmCtx.beginPath(); cmCtx.moveTo(sp.x,sp.y); cmCtx.lineTo(ep.x,ep.y); cmCtx.stroke();
     cmCtx.setLineDash([]);
-    cmCtx.fillStyle=col+'cc'; // match line opacity so arrowhead blends with dashes
+    cmCtx.fillStyle=col+'dd'; // arrowhead matches line exactly
     cmCtx.beginPath();
     cmCtx.moveTo(ep.x,ep.y);
-    cmCtx.lineTo(ep.x-Math.cos(ang-0.35)*8,ep.y-Math.sin(ang-0.35)*8);
-    cmCtx.lineTo(ep.x-Math.cos(ang+0.35)*8,ep.y-Math.sin(ang+0.35)*8);
+    cmCtx.lineTo(ep.x-Math.cos(ang-0.35)*9,ep.y-Math.sin(ang-0.35)*9);
+    cmCtx.lineTo(ep.x-Math.cos(ang+0.35)*9,ep.y-Math.sin(ang+0.35)*9);
     cmCtx.closePath(); cmCtx.fill();
   } else if(phase===2 && e.lbl) {
     // Draw label pill on top of everything (called after nodes are drawn)
     const mx=(sp.x+ep.x)/2, my=(sp.y+ep.y)/2;
     const isLight=cmIsLight();
     cmCtx.font='9px system-ui'; cmCtx.textAlign='center'; cmCtx.textBaseline='middle';
-    const tw=cmCtx.measureText(e.lbl).width+6;
-    // Pill background: contrasting to canvas (light bg in dark mode, dark bg in light mode)
-    cmCtx.fillStyle=isLight?'rgba(30,30,50,.88)':'rgba(240,240,255,.95)';
-    cmCtx.fillRect(mx-tw/2,my-6,tw,12);
-    // Text: full-opacity category color — readable on both dark and light pill backgrounds
+    const tw=cmCtx.measureText(e.lbl).width+8;
+    // Pill background contrasts the canvas; text uses the boosted edge color
+    cmCtx.fillStyle=isLight?'rgba(20,20,40,.85)':'rgba(235,235,252,.96)';
+    cmCtx.fillRect(mx-tw/2,my-7,tw,14);
     cmCtx.fillStyle=col; cmCtx.fillText(e.lbl,mx,my);
   }
   cmCtx.restore();

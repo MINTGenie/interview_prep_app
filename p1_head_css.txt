@@ -195,7 +195,7 @@ body.hc .conf-dot.unknown{background:rgba(107,114,128,.15);color:#9ca3af;border-
 #cm-sidebar{width:230px;flex-shrink:0;background:var(--s1);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .cm-sb-sec{padding:9px 11px;border-bottom:1px solid var(--border);flex-shrink:0}
 .cm-sb-sec h4{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
-.cm-actions{display:flex;gap:4px;flex-wrap:wrap;padding:6px 9px;border-bottom:1px solid var(--border);flex-shrink:0}
+.cm-actions{display:flex;gap:4px;flex-wrap:wrap;padding:8px 9px 7px;border-bottom:1px solid var(--border);flex-shrink:0}
 .cm-btn{padding:3px 9px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--s2);color:var(--muted2);transition:all .15s}
 .cm-btn:hover,.cm-btn.on{background:var(--s3);color:var(--text);border-color:#3a3a55}
 .cm-btn.on{border-color:var(--acc3);color:var(--acc3)}
