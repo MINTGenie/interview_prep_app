@@ -125,6 +125,13 @@ function cmHexRgb(hex) {
   return { r:parseInt(h.slice(0,2),16)||0, g:parseInt(h.slice(2,4),16)||0, b:parseInt(h.slice(4,6),16)||0 };
 }
 
+// Convert a hex color + alpha (0–1) to a reliable rgba() string for canvas use.
+// Using rgba() avoids silent failures from 8-char hex strings in some browsers.
+function cmRgba(col, alpha) {
+  const {r,g,b} = cmHexRgb(col);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 // Return an edge color that is always visible on the current canvas background.
 // In dark mode, dark LLM-generated colors are boosted; in light mode used as-is.
 function cmVisibleColor(col) {
@@ -205,9 +212,10 @@ function cmDrawGrid() {
     }
 }
 
-// phase 1 = line + arrowhead only; phase 2 = label pill only
-// Two-pass drawing ensures labels are always rendered AFTER node glows,
-// preventing the hover shadow from painting over edge label pills.
+// Two-pass edge drawing:
+//   phase 1 = dashed line only (drawn before nodes so nodes paint on top)
+//   phase 2 = arrowhead + label pill (drawn after nodes so both are always visible)
+// Using rgba() throughout to avoid silent failures from 8-char hex in some browsers.
 function cmDrawEdge(e, phase) {
   const fn=cmNodeById(e.f), tn=cmNodeById(e.t);
   if(!fn||!tn||!cmVisible(fn)||!cmVisible(tn)) return;
@@ -219,26 +227,29 @@ function cmDrawEdge(e, phase) {
   const col = cmVisibleColor(rawCol); // guaranteed visible on current canvas
   cmCtx.save();
   if(phase===1) {
-    // Draw dashed line + arrowhead — both use the same boosted color
-    cmCtx.strokeStyle=col+'dd'; cmCtx.lineWidth=1.6; cmCtx.setLineDash([5,4]);
+    // Draw dashed line only — nodes will paint on top of this
+    cmCtx.strokeStyle=cmRgba(col,0.87); cmCtx.lineWidth=1.6; cmCtx.setLineDash([5,4]);
     cmCtx.beginPath(); cmCtx.moveTo(sp.x,sp.y); cmCtx.lineTo(ep.x,ep.y); cmCtx.stroke();
     cmCtx.setLineDash([]);
-    cmCtx.fillStyle=col+'dd'; // arrowhead matches line exactly
+  } else if(phase===2) {
+    // Draw arrowhead on top of nodes (same color as line)
+    cmCtx.fillStyle=cmRgba(col,0.87);
     cmCtx.beginPath();
     cmCtx.moveTo(ep.x,ep.y);
     cmCtx.lineTo(ep.x-Math.cos(ang-0.35)*9,ep.y-Math.sin(ang-0.35)*9);
     cmCtx.lineTo(ep.x-Math.cos(ang+0.35)*9,ep.y-Math.sin(ang+0.35)*9);
     cmCtx.closePath(); cmCtx.fill();
-  } else if(phase===2 && e.lbl) {
-    // Draw label pill on top of everything (called after nodes are drawn)
-    const mx=(sp.x+ep.x)/2, my=(sp.y+ep.y)/2;
-    const isLight=cmIsLight();
-    cmCtx.font='9px system-ui'; cmCtx.textAlign='center'; cmCtx.textBaseline='middle';
-    const tw=cmCtx.measureText(e.lbl).width+8;
-    // Pill background contrasts the canvas; text uses the boosted edge color
-    cmCtx.fillStyle=isLight?'rgba(20,20,40,.85)':'rgba(235,235,252,.96)';
-    cmCtx.fillRect(mx-tw/2,my-7,tw,14);
-    cmCtx.fillStyle=col; cmCtx.fillText(e.lbl,mx,my);
+    // Draw label pill on top of everything
+    if(e.lbl) {
+      const mx=(sp.x+ep.x)/2, my=(sp.y+ep.y)/2;
+      const isLight=cmIsLight();
+      cmCtx.font='9px system-ui'; cmCtx.textAlign='center'; cmCtx.textBaseline='middle';
+      const tw=cmCtx.measureText(e.lbl).width+8;
+      // Pill background contrasts the canvas; text uses the boosted edge color
+      cmCtx.fillStyle=isLight?'rgba(20,20,40,0.85)':'rgba(235,235,252,0.96)';
+      cmCtx.fillRect(mx-tw/2,my-7,tw,14);
+      cmCtx.fillStyle=cmRgba(col,1); cmCtx.fillText(e.lbl,mx,my);
+    }
   }
   cmCtx.restore();
 }

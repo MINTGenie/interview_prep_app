@@ -580,11 +580,21 @@ updateProgress();
     if(window.PREP_CONFIG.model) s.model=window.PREP_CONFIG.model;
     persistSettings(s);
   }
-  // Default to light theme. Only use dark if user has explicitly saved highContrast:false.
-  if(loadSettings().highContrast !== false) {
-    document.body.classList.add('hc');
-    const btn=document.getElementById('hc-btn');
-    if(btn){btn.classList.add('on');btn.textContent='🌙';}
+  // Default to light theme (themeVersion:2).
+  // Migration: existing users who have highContrast:false saved from the old dark default
+  // are migrated on first load — themeVersion absence means old settings, force light.
+  {
+    const ts=loadSettings();
+    const wantsLight = !ts.themeVersion ? true : (ts.highContrast !== false);
+    if(wantsLight) {
+      document.body.classList.add('hc');
+      const btn=document.getElementById('hc-btn');
+      if(btn){btn.classList.add('on');btn.textContent='🌙';}
+    }
+    if(!ts.themeVersion) {
+      ts.themeVersion=2; ts.highContrast=true;
+      persistSettings(ts);
+    }
   }
   // Populate model dropdown
   updateModelList();
