@@ -580,8 +580,8 @@ updateProgress();
     if(window.PREP_CONFIG.model) s.model=window.PREP_CONFIG.model;
     persistSettings(s);
   }
-  // Restore light mode
-  if(loadSettings().highContrast) {
+  // Default to light theme. Only use dark if user has explicitly saved highContrast:false.
+  if(loadSettings().highContrast !== false) {
     document.body.classList.add('hc');
     const btn=document.getElementById('hc-btn');
     if(btn){btn.classList.add('on');btn.textContent='🌙';}

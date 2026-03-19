@@ -282,6 +282,9 @@ function toggleHC() {
   const s=loadSettings();s.highContrast=isLight;persistSettings(s);
   const btn=document.getElementById('hc-btn');
   if(btn){btn.classList.toggle('on',isLight);btn.textContent=isLight?'🌙':'☀';}
+  // Invalidate canvas theme cache so concept map redraws with new theme
+  if(typeof _cmIsLightCache!=='undefined') _cmIsLightCache=null;
+  if(typeof cmDraw==='function') cmDraw();
 }
 
 // ═══ SETTINGS MODAL ═══

@@ -149,7 +149,23 @@ function cmRr(x, y, w, h, r) {
 }
 
 // ── Draw ──
-function cmIsLight() { return document.body.classList.contains('hc'); }
+// Detect dark/light by reading the actual computed background color of the canvas wrap.
+// This is always correct regardless of CSS class state or timing.
+let _cmIsLightCache = null, _cmIsLightTick = -1;
+function cmIsLight() {
+  // Cache per-animation-frame to avoid repeated getComputedStyle calls
+  const now = performance.now()|0;
+  if(_cmIsLightCache !== null && now === _cmIsLightTick) return _cmIsLightCache;
+  const wrap = cmWrap || document.getElementById('cm-canvas-wrap');
+  if(!wrap) return false;
+  const bg = getComputedStyle(wrap).backgroundColor; // 'rgb(r, g, b)' or 'rgba(r,g,b,a)'
+  const m = bg.match(/\d+/g);
+  if(!m || m.length < 3) return false;
+  const lum = (parseInt(m[0])*299 + parseInt(m[1])*587 + parseInt(m[2])*114) / 1000;
+  _cmIsLightCache = lum > 127;
+  _cmIsLightTick = now;
+  return _cmIsLightCache;
+}
 
 function cmDrawGrid() {
   const gs=55;
@@ -175,11 +191,11 @@ function cmDrawEdge(e, phase) {
   const col=e.col||'#888';
   cmCtx.save();
   if(phase===1) {
-    // Draw dashed line + arrowhead
+    // Draw dashed line + arrowhead — both use the same edge color for visual consistency
     cmCtx.strokeStyle=col+'cc'; cmCtx.lineWidth=1.4; cmCtx.setLineDash([5,4]);
     cmCtx.beginPath(); cmCtx.moveTo(sp.x,sp.y); cmCtx.lineTo(ep.x,ep.y); cmCtx.stroke();
     cmCtx.setLineDash([]);
-    cmCtx.fillStyle=col+'ee';
+    cmCtx.fillStyle=col+'cc'; // match line opacity so arrowhead blends with dashes
     cmCtx.beginPath();
     cmCtx.moveTo(ep.x,ep.y);
     cmCtx.lineTo(ep.x-Math.cos(ang-0.35)*8,ep.y-Math.sin(ang-0.35)*8);
@@ -191,9 +207,11 @@ function cmDrawEdge(e, phase) {
     const isLight=cmIsLight();
     cmCtx.font='9px system-ui'; cmCtx.textAlign='center'; cmCtx.textBaseline='middle';
     const tw=cmCtx.measureText(e.lbl).width+6;
-    cmCtx.fillStyle=isLight?'rgba(225,225,245,.97)':'rgba(10,10,20,.92)';
+    // Pill background: contrasting to canvas (light bg in dark mode, dark bg in light mode)
+    cmCtx.fillStyle=isLight?'rgba(30,30,50,.88)':'rgba(240,240,255,.95)';
     cmCtx.fillRect(mx-tw/2,my-6,tw,12);
-    cmCtx.fillStyle=col+'ee'; cmCtx.fillText(e.lbl,mx,my);
+    // Text: full-opacity category color — readable on both dark and light pill backgrounds
+    cmCtx.fillStyle=col; cmCtx.fillText(e.lbl,mx,my);
   }
   cmCtx.restore();
 }
