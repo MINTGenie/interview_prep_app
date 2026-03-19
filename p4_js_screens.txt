@@ -204,4 +204,38 @@ function clearAllData() {
   curSession=null; renderHistory(); showScreen('setup');
 }
 
+function exportSessionsData() {
+  const sessions = loadSessions();
+  const settings = loadSettings();
+  if(!sessions.length) { alert('No sessions to backup.'); return; }
+  const payload = { version:1, exportedAt:new Date().toISOString(), sessions, settings };
+  const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'interview-prep-backup-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+
+function importSessionsData(input) {
+  if(!input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const payload = JSON.parse(e.target.result);
+      const incoming = Array.isArray(payload) ? payload : (payload.sessions||[]);
+      if(!incoming.length) { alert('No sessions found in backup file.'); return; }
+      const existing = loadSessions();
+      const existingIds = new Set(existing.map(s=>s.id));
+      const newSessions = incoming.filter(s=>!existingIds.has(s.id));
+      const merged = [...existing, ...newSessions];
+      saveSessions(merged);
+      renderHistory();
+      alert('Restored '+newSessions.length+' new session(s). ('+( incoming.length-newSessions.length)+' already existed.)');
+    } catch(err) { alert('Could not read backup file: '+err.message); }
+    input.value='';
+  };
+  reader.readAsText(input.files[0]);
+}
+
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

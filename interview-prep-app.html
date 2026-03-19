@@ -14,11 +14,20 @@
   --day1:#2563eb;--day2:#7c3aed;--sb:220px;
 }
 body.hc{
-  --bg:#000;--s1:#0a0a0a;--s2:#111;--s3:#1a1a1a;--border:#fff;
-  --text:#fff;--muted:#ccc;--muted2:#e0e0e0;
-  --acc:#fbbf24;--acc2:#93c5fd;--acc3:#86efac;--acc4:#d8b4fe;--acc5:#fde68a;
-  --solid:#86efac;--fuzzy:#fef08a;--unknown:#6b7280;
+  --bg:#f7f7ff;--s1:#eeeef8;--s2:#e5e5f5;--s3:#dcdcee;--border:#c0c0d8;
+  --text:#16162a;--muted:#52528a;--muted2:#38387a;
+  --acc:#c04800;--acc2:#1558c8;--acc3:#147a32;--acc4:#6e1cb8;--acc5:#866800;
+  --solid:#147a32;--fuzzy:#4848a0;--unknown:#8888aa;
+  --day1:#1040c8;--day2:#6020b8;
 }
+body.hc html,body.hc body{background:var(--bg);color:var(--text)}
+body.hc #new-btn{background:#d0e4ff;color:#0f3a8a;border-color:#9ab8e0}
+body.hc #new-btn:hover{background:#bcd5ff}
+body.hc .inp-area,body.hc input[type=text],body.hc input[type=url],body.hc input[type=password],body.hc select{background:#fff!important;color:var(--text)!important;border-color:var(--border)!important}
+body.hc .icon-btn{background:var(--s2);color:var(--text)}
+body.hc #top-bar{background:var(--s1);border-bottom:1px solid var(--border)}
+body.hc .bcard{box-shadow:0 1px 6px rgba(0,0,40,.10)}
+body.hc .sb-btn{background:var(--s2);color:var(--text)}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
 #app{display:flex;height:100vh;overflow:hidden}
 #sidebar{position:relative;width:var(--sb);flex-shrink:0;background:var(--s1);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
@@ -338,6 +347,9 @@ body.hc :focus-visible{outline:3px solid #ffe600;outline-offset:3px}
     <div id="hist-list"></div>
     <div id="sb-footer">
       <button class="sb-btn" onclick="openSettings()">⚙ Settings</button>
+      <button class="sb-btn" onclick="exportSessionsData()" title="Save all sessions to a backup file">📤 Backup Data</button>
+      <button class="sb-btn" onclick="document.getElementById('import-file').click()" title="Restore sessions from a backup file">📥 Restore Data</button>
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importSessionsData(this)">
       <button class="sb-btn" onclick="clearAllData()">🗑 Clear All Data</button>
       <button class="sb-btn" id="dl-btn" onclick="downloadCurrentSession()">⬇ Download HTML</button>
     </div>
@@ -352,7 +364,7 @@ body.hc :focus-visible{outline:3px solid #ffe600;outline-offset:3px}
         <span id="prog-lbl">0 / 0 solid</span>
         <div id="prog-bar-el"><div id="prog-fill-el" style="width:0%"></div></div>
       </div>
-      <button class="icon-btn" id="hc-btn" onclick="toggleHC()" title="Toggle high contrast">◑</button>
+      <button class="icon-btn" id="hc-btn" onclick="toggleHC()" title="Toggle light / dark mode">☀</button>
     </header>
 
     <div id="tab-bar">
@@ -636,10 +648,11 @@ function loadScript(src) {
 async function extractTextFromPDF(file) {
   if(!window.pdfjsLib) {
     await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    // Use empty workerSrc so PDF.js runs in fake-worker mode (no CDN fetch needed — works from file://)
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc='';
   }
   const ab = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data:ab}).promise;
+  const pdf = await pdfjsLib.getDocument({data:ab,useWorkerFetch:false,isEvalSupported:false,useSystemFonts:true}).promise;
   let text='';
   for(let i=1;i<=pdf.numPages;i++){
     const pg = await pdf.getPage(i);
@@ -787,11 +800,13 @@ document.querySelectorAll('.tab-btn').forEach(b=>{
   b.addEventListener('click',()=>switchTab(b.dataset.tab));
 });
 
-// ═══ HIGH CONTRAST ═══
+// ═══ LIGHT / DARK MODE ═══
 function toggleHC() {
   document.body.classList.toggle('hc');
-  const s=loadSettings();s.highContrast=document.body.classList.contains('hc');persistSettings(s);
-  document.getElementById('hc-btn').classList.toggle('on',s.highContrast);
+  const isLight=document.body.classList.contains('hc');
+  const s=loadSettings();s.highContrast=isLight;persistSettings(s);
+  const btn=document.getElementById('hc-btn');
+  if(btn){btn.classList.toggle('on',isLight);btn.textContent=isLight?'🌙':'☀';}
 }
 
 // ═══ SETTINGS MODAL ═══
@@ -1181,6 +1196,40 @@ function clearAllData() {
   if(!confirm('Delete ALL sessions and settings? This cannot be undone.')) return;
   localStorage.removeItem(LS_SETTINGS); localStorage.removeItem(LS_SESSIONS);
   curSession=null; renderHistory(); showScreen('setup');
+}
+
+function exportSessionsData() {
+  const sessions = loadSessions();
+  const settings = loadSettings();
+  if(!sessions.length) { alert('No sessions to backup.'); return; }
+  const payload = { version:1, exportedAt:new Date().toISOString(), sessions, settings };
+  const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'interview-prep-backup-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+
+function importSessionsData(input) {
+  if(!input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const payload = JSON.parse(e.target.result);
+      const incoming = Array.isArray(payload) ? payload : (payload.sessions||[]);
+      if(!incoming.length) { alert('No sessions found in backup file.'); return; }
+      const existing = loadSessions();
+      const existingIds = new Set(existing.map(s=>s.id));
+      const newSessions = incoming.filter(s=>!existingIds.has(s.id));
+      const merged = [...existing, ...newSessions];
+      saveSessions(merged);
+      renderHistory();
+      alert('Restored '+newSessions.length+' new session(s). ('+( incoming.length-newSessions.length)+' already existed.)');
+    } catch(err) { alert('Could not read backup file: '+err.message); }
+    input.value='';
+  };
+  reader.readAsText(input.files[0]);
 }
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -2476,10 +2525,11 @@ updateProgress();
     if(window.PREP_CONFIG.model) s.model=window.PREP_CONFIG.model;
     persistSettings(s);
   }
-  // Restore high contrast
+  // Restore light mode
   if(loadSettings().highContrast) {
     document.body.classList.add('hc');
-    document.getElementById('hc-btn')?.classList.add('on');
+    const btn=document.getElementById('hc-btn');
+    if(btn){btn.classList.add('on');btn.textContent='🌙';}
   }
   // Populate model dropdown
   updateModelList();

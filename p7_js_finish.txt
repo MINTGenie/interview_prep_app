@@ -580,10 +580,11 @@ updateProgress();
     if(window.PREP_CONFIG.model) s.model=window.PREP_CONFIG.model;
     persistSettings(s);
   }
-  // Restore high contrast
+  // Restore light mode
   if(loadSettings().highContrast) {
     document.body.classList.add('hc');
-    document.getElementById('hc-btn')?.classList.add('on');
+    const btn=document.getElementById('hc-btn');
+    if(btn){btn.classList.add('on');btn.textContent='🌙';}
   }
   // Populate model dropdown
   updateModelList();

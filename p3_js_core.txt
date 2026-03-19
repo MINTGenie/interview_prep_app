@@ -123,10 +123,11 @@ function loadScript(src) {
 async function extractTextFromPDF(file) {
   if(!window.pdfjsLib) {
     await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    // Use empty workerSrc so PDF.js runs in fake-worker mode (no CDN fetch needed — works from file://)
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc='';
   }
   const ab = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data:ab}).promise;
+  const pdf = await pdfjsLib.getDocument({data:ab,useWorkerFetch:false,isEvalSupported:false,useSystemFonts:true}).promise;
   let text='';
   for(let i=1;i<=pdf.numPages;i++){
     const pg = await pdf.getPage(i);
@@ -274,11 +275,13 @@ document.querySelectorAll('.tab-btn').forEach(b=>{
   b.addEventListener('click',()=>switchTab(b.dataset.tab));
 });
 
-// ═══ HIGH CONTRAST ═══
+// ═══ LIGHT / DARK MODE ═══
 function toggleHC() {
   document.body.classList.toggle('hc');
-  const s=loadSettings();s.highContrast=document.body.classList.contains('hc');persistSettings(s);
-  document.getElementById('hc-btn').classList.toggle('on',s.highContrast);
+  const isLight=document.body.classList.contains('hc');
+  const s=loadSettings();s.highContrast=isLight;persistSettings(s);
+  const btn=document.getElementById('hc-btn');
+  if(btn){btn.classList.toggle('on',isLight);btn.textContent=isLight?'🌙':'☀';}
 }
 
 // ═══ SETTINGS MODAL ═══

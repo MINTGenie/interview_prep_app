@@ -75,6 +75,9 @@
     <div id="hist-list"></div>
     <div id="sb-footer">
       <button class="sb-btn" onclick="openSettings()">⚙ Settings</button>
+      <button class="sb-btn" onclick="exportSessionsData()" title="Save all sessions to a backup file">📤 Backup Data</button>
+      <button class="sb-btn" onclick="document.getElementById('import-file').click()" title="Restore sessions from a backup file">📥 Restore Data</button>
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importSessionsData(this)">
       <button class="sb-btn" onclick="clearAllData()">🗑 Clear All Data</button>
       <button class="sb-btn" id="dl-btn" onclick="downloadCurrentSession()">⬇ Download HTML</button>
     </div>
@@ -89,7 +92,7 @@
         <span id="prog-lbl">0 / 0 solid</span>
         <div id="prog-bar-el"><div id="prog-fill-el" style="width:0%"></div></div>
       </div>
-      <button class="icon-btn" id="hc-btn" onclick="toggleHC()" title="Toggle high contrast">◑</button>
+      <button class="icon-btn" id="hc-btn" onclick="toggleHC()" title="Toggle light / dark mode">☀</button>
     </header>
 
     <div id="tab-bar">
