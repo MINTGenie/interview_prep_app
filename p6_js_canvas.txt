@@ -149,11 +149,14 @@ function cmRr(x, y, w, h, r) {
 }
 
 // ── Draw ──
+function cmIsLight() { return document.body.classList.contains('hc'); }
+
 function cmDrawGrid() {
   const gs=55;
   const ox=((-cmTf.x/cmTf.s)%gs+gs)%gs;
   const oy=((-cmTf.y/cmTf.s)%gs+gs)%gs;
-  cmCtx.fillStyle='rgba(255,255,255,.025)';
+  // Adapt dot color: subtle dark dots in light mode, subtle white dots in dark mode
+  cmCtx.fillStyle=cmIsLight()?'rgba(0,0,100,.07)':'rgba(255,255,255,.025)';
   for(let gx=ox-gs; gx<cmW/cmTf.s+gs; gx+=gs)
     for(let gy=oy-gs; gy<cmH/cmTf.s+gs; gy+=gs) {
       cmCtx.beginPath(); cmCtx.arc(gx,gy,1,0,Math.PI*2); cmCtx.fill();
@@ -167,11 +170,13 @@ function cmDrawEdge(e) {
   const ep=cmEdgePt(tn.x,tn.y,fn.x,fn.y,9);
   const ang=Math.atan2(ep.y-sp.y,ep.x-sp.x);
   const col=e.col||'#888';
+  const isLight=cmIsLight();
   cmCtx.save();
-  cmCtx.strokeStyle=col+'88'; cmCtx.lineWidth=1.1; cmCtx.setLineDash([5,4]);
+  // Use higher opacity so edges are visible in both dark and light modes
+  cmCtx.strokeStyle=col+'cc'; cmCtx.lineWidth=1.4; cmCtx.setLineDash([5,4]);
   cmCtx.beginPath(); cmCtx.moveTo(sp.x,sp.y); cmCtx.lineTo(ep.x,ep.y); cmCtx.stroke();
   cmCtx.setLineDash([]);
-  cmCtx.fillStyle=col+'aa';
+  cmCtx.fillStyle=col+'ee';
   cmCtx.beginPath();
   cmCtx.moveTo(ep.x,ep.y);
   cmCtx.lineTo(ep.x-Math.cos(ang-0.35)*8,ep.y-Math.sin(ang-0.35)*8);
@@ -181,8 +186,10 @@ function cmDrawEdge(e) {
     const mx=(sp.x+ep.x)/2, my=(sp.y+ep.y)/2;
     cmCtx.font='9px system-ui'; cmCtx.textAlign='center'; cmCtx.textBaseline='middle';
     const tw=cmCtx.measureText(e.lbl).width+6;
-    cmCtx.fillStyle='#0a0a1499'; cmCtx.fillRect(mx-tw/2,my-6,tw,12);
-    cmCtx.fillStyle=col+'aa'; cmCtx.fillText(e.lbl,mx,my);
+    // Adapt label pill background to current theme
+    cmCtx.fillStyle=isLight?'rgba(230,230,248,.95)':'rgba(10,10,20,.88)';
+    cmCtx.fillRect(mx-tw/2,my-6,tw,12);
+    cmCtx.fillStyle=col+'dd'; cmCtx.fillText(e.lbl,mx,my);
   }
   cmCtx.restore();
 }
@@ -193,13 +200,18 @@ function cmDrawNode(n) {
   const cc = catDef.color;
   const { r, g, b } = cmHexRgb(cc);
   const isHov = n.id===cmHov;
+  const isLight = cmIsLight();
   let fill, stroke, ta;
   if(knowledge==='know') {
     fill=`rgba(${r},${g},${b},.18)`; stroke=cc; ta=1;
   } else if(knowledge==='fuzzy') {
-    fill=`rgba(${r},${g},${b},.07)`; stroke=`rgba(${r},${g},${b},.45)`; ta=.65;
+    // In light mode, increase fill opacity so the box is visible against white canvas
+    fill=isLight?`rgba(${r},${g},${b},.13)`:`rgba(${r},${g},${b},.07)`;
+    stroke=isLight?`rgba(${r},${g},${b},.65)`:`rgba(${r},${g},${b},.45)`; ta=.85;
   } else {
-    fill=`rgba(18,18,32,.9)`; stroke=`rgba(${r},${g},${b},.18)`; ta=.28;
+    // unknown: dark fill in dark mode, light tinted fill in light mode
+    fill=isLight?`rgba(${r},${g},${b},.06)`:`rgba(18,18,32,.9)`;
+    stroke=isLight?`rgba(${r},${g},${b},.35)`:`rgba(${r},${g},${b},.18)`; ta=isLight?.5:.28;
   }
   cmCtx.save();
   if(isHov) { cmCtx.shadowColor=cc; cmCtx.shadowBlur=18; }
@@ -213,14 +225,16 @@ function cmDrawNode(n) {
   const kc=knowledge==='know'?'#4ade80':knowledge==='fuzzy'?'#606080':'#252535';
   cmCtx.fillStyle=kc;
   cmCtx.beginPath(); cmCtx.arc(x+CM_NW/2-9,y-CM_NH/2+9,4,0,Math.PI*2); cmCtx.fill();
-  if(knowledge==='unknown') { cmCtx.strokeStyle='#3a3a55'; cmCtx.lineWidth=1; cmCtx.stroke(); }
+  if(knowledge==='unknown') { cmCtx.strokeStyle=isLight?'#c0c0d8':'#3a3a55'; cmCtx.lineWidth=1; cmCtx.stroke(); }
   cmCtx.font='600 12px system-ui';
-  cmCtx.fillStyle=`rgba(226,226,240,${ta})`;
+  // Adapt text color: near-white in dark mode, near-black in light mode
+  cmCtx.fillStyle=isLight?`rgba(22,22,42,${ta})`:`rgba(226,226,240,${ta})`;
   cmCtx.textAlign='center'; cmCtx.textBaseline='middle';
   cmCtx.fillText(label,x,y-7);
   const subTxt=sub&&sub.length>21?sub.substring(0,20)+'…':(sub||'');
   cmCtx.font='10px system-ui';
-  cmCtx.fillStyle=`rgba(${r},${g},${b},${ta*.9})`;
+  // Sub-label: use category color (visible in both modes), slightly stronger in light mode
+  cmCtx.fillStyle=isLight?`rgba(${r},${g},${b},${Math.min(1,ta*1.3)})`:`rgba(${r},${g},${b},${ta*.9})`;
   cmCtx.fillText(subTxt,x,y+9);
   cmCtx.restore();
 }

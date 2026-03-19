@@ -187,11 +187,11 @@ body.hc .conf-dot.unknown{background:rgba(107,114,128,.15);color:#9ca3af;border-
 #concept-wrap{position:relative;height:calc(100vh - 160px);min-height:400px;display:flex;overflow:hidden;margin:-16px}
 #cm-canvas-wrap{position:relative;flex:1;overflow:hidden;background:var(--bg)}
 #cm-cv{display:block;width:100%;height:100%}
-#cm-tip{position:absolute;display:none;max-width:290px;background:#111122;border:1px solid #2a2a40;border-radius:9px;padding:11px 13px;pointer-events:none;z-index:200;font-size:12px;line-height:1.6;box-shadow:0 10px 35px rgba(0,0,0,.7)}
+#cm-tip{position:absolute;display:none;max-width:290px;background:var(--s2);border:1px solid var(--border);border-radius:9px;padding:11px 13px;pointer-events:none;z-index:200;font-size:12px;line-height:1.6;box-shadow:0 8px 30px rgba(0,0,0,.35)}
 #cm-tip .t-title{font-weight:700;font-size:13px;margin-bottom:2px}
 #cm-tip .t-sub{font-size:10px;color:var(--muted2);margin-bottom:6px;font-style:italic}
-#cm-tip .t-desc{color:#a0a0c0;margin-bottom:6px}
-#cm-tip .t-tip{font-size:10px;color:#4a6a4a;border-top:1px solid #1e1e30;padding-top:5px}
+#cm-tip .t-desc{color:var(--text);opacity:.8;margin-bottom:6px}
+#cm-tip .t-tip{font-size:10px;color:var(--acc3);border-top:1px solid var(--border);padding-top:5px}
 #cm-sidebar{width:230px;flex-shrink:0;background:var(--s1);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .cm-sb-sec{padding:9px 11px;border-bottom:1px solid var(--border);flex-shrink:0}
 .cm-sb-sec h4{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
