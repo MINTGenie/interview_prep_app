@@ -26,7 +26,9 @@ import json as _json
 # Read p6 canvas source and inject as window._cmSrc
 cm_src = read('p6_js_canvas.txt')
 cm_src_inject = f'\n<script>window._cmSrc={_json.dumps(cm_src)};</script>\n'
-output = output.replace('</body>', cm_src_inject + '</body>')
+# Replace only the LAST </body> (the app's real closing tag, not the one inside the export template literal)
+last_body_idx = output.rfind('</body>')
+output = output[:last_body_idx] + cm_src_inject + output[last_body_idx:]
 
 out_path = os.path.join(BASE, 'interview-prep-app.html')
 with open(out_path, 'w', encoding='utf-8') as f:
